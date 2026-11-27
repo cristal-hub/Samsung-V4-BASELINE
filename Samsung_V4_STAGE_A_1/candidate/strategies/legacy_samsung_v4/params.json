@@ -1,0 +1,23 @@
+{
+  "strategy_id": "legacy_samsung_v4",
+  "strategy_version": "tsclp_v2.0",
+  "description": "Исторические параметры старой стратегии Samsung V4 (Tsclp_v2.0). БАЗОВЫЕ значения — в точности из baseline config.py (коммит 884cefd6f12a99f6adc14b5ed4c9eeda21d32e04). Профильные значения (SANDBOX_TEST / TECH_CHECK / CONSERVATIVE) переопределяют часть базовых и хранятся в strategies/legacy_samsung_v4/profiles.py. Значения НЕ изменены и НЕ оптимизированы; идентичность проверяется тестом G-5.",
+  "shared_params": {
+    "MA_FAST_PERIOD": 9,
+    "MA_SLOW_PERIOD": 21,
+    "TREND_FILTER_MA_PERIOD": 100,
+    "BB_PERIOD": 20,
+    "BB_STD_DEV": 2,
+    "RSI_PERIOD": 14,
+    "RSI_OVERBOUGHT": 70,
+    "RSI_OVERSOLD": 30,
+    "MIN_CANDLES_FOR_SIGNAL": 60,
+    "ADX_PERIOD": 14,
+    "VOLUME_CONFIRMATION_WINDOW": 20
+  },
+  "notes": [
+    "Профили SANDBOX_TEST / TECH_CHECK / CONSERVATIVE — исторические регрессионные данные, а не готовые стратегии нового движка.",
+    "FORCE_TRADE сознательно НЕ перенесён в новую архитектуру (ТЗ Этапа A, раздел 4): ни как профиль, ни как режим, ни как переключатель.",
+    "Параметры риск-менеджмента (RISK_PER_TRADE, стопы, тейки, ATR-мультипликаторы и т.п.) в params.json НЕ входят: они относятся к риск-модели (Этап D), а не к входному сигналу стратегии."
+  ]
+}
