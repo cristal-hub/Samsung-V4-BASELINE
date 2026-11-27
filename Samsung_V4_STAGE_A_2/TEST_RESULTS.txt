@@ -1,0 +1,251 @@
+================================================================================
+TEST_RESULTS.txt
+SAMSUNG V4 — NEW STRATEGY ENGINE. STAGE A.1 CORRECTIVE:
+ИСПРАВЛЕНИЕ ТРЁХ ЗАМЕЧАНИЙ НЕЗАВИСИМОГО АУДИТА STAGE A
+Дата прогона: 2026-11-27
+Исходный пакет: Samsung_V4_STAGE_A (Stage A, рабочая версия)
+Baseline: commit 884cefd6f12a99f6adc14b5ed4c9eeda21d32e04
+(cristal-hub/Samsung-V4-BASELINE), изолированная копия (git archive)
+Режим: ТОЛЬКО offline — без сети, без брокера, без Sandbox/LIVE-заявок
+================================================================================
+
+0. ЧТО ПРОВЕРЯЛОСЬ
+--------------------------------------------------------------------------------
+Замечание №1 — StrategyConfig действительно immutable, включая вложенные
+               структуры; config_hash всегда соответствует фактической
+               конфигурации.
+Замечание №2 — атрибуция нового движка: единый явный механизм, атрибуция
+               всех типов НОВЫХ объектов (события, виртуальные ордера,
+               виртуальные позиции, строки исследовательского CSV/JSONL);
+               старые production-механизмы Samsung V4 не изменены.
+Замечание №3 — глобальное изменяемое состояние (set_current_context и др.)
+               удалено; явное внедрение зависимости; изоляция при
+               параллельной работе.
+
+1. ОКРУЖЕНИЕ ПРОГОНА (совпадает с окружением «заявленных зависимостей» Stage A)
+--------------------------------------------------------------------------------
+Python                3.12.16 (Linux x64)
+pytest                9.0.2
+pytest-asyncio        1.3.0
+pandas                2.2.3
+numpy                 2.1.3
+python-dotenv         1.2.2
+pandas-ta-classic     0.3.15  (удовлетворяет ограничению requirements.txt
+                               «pandas-ta-classic>=0.3.14b»)
+python-telegram-bot   21.11.1 (ограничение «>=20.0,<22.0»)
+t-tech-investments    1.51.0  — НЕДОСТУПЕН в публичном PyPI; действует штатная
+                               заглушка tests/conftest.py (предусмотрена
+                               авторами baseline для чистых окружений)
+Сетевые обращения тестов: нет. Брокерские подключения: нет.
+Sandbox/LIVE-заявки: нет. SKIP-тестов: 0; заглушек вместо реальных тестов: нет.
+
+2. СОСТОЯНИЕ ДО ИЗМЕНЕНИЙ (исходный пакет Stage A, измерено в этой среде)
+--------------------------------------------------------------------------------
+Команда: python -m pytest      ->  899 passed, 0 failed (~18–22 c, exit 0)
+Команда: python -m pytest tests -> 379 passed, 0 failed
+
+Это в точности воспроизводит цифры поставки Stage A
+(771 baseline + 128 Stage A = 899) — среда сопоставима с «окружением 1»
+отчёта Stage A.
+
+3. СОСТОЯНИЕ ПОСЛЕ КОРРЕКТИРОВКИ STAGE A.1 (измерено)
+--------------------------------------------------------------------------------
+Команда: python -m pytest
+Результат: 980 passed, 0 failed, 0 skipped (~19–22 c, exit code 0)
+
+Команда: python -m pytest tests
+Результат: 460 passed, 0 failed (exit code 0)
+
+Разложение дельты:
+  baseline-тесты (не изменялись) .................. 771 passed (как было)
+  тесты Stage A (6 файлов test_stage_a_*.py) ...... 128 passed (как было,
+        1:1 адаптированы только проверки глобального контекста — см. п. 5)
+  НОВЫЕ corrective-тесты Stage A.1 ................  81 passed
+        tests/test_stage_a1_config_immutability.py ... 48 passed
+        tests/test_stage_a1_attribution_explicit.py .. 33 passed
+  ИТОГО: 771 + 128 + 81 = 980; новых регрессионных ошибок: 0;
+  исчезнувших тестов: 0; изменивших исход старых тестов: 0.
+
+4. ПОФАЙЛОВОЕ СОСТОЯНИЕ STAGE A (все шесть файлов — без изменений смысла)
+--------------------------------------------------------------------------------
+  tests/test_stage_a_strategy_api.py     22 passed — контракт стратегии,
+                                             config_hash (детерминизм, порядок
+                                             ключей, изменение параметров,
+                                             отказ NaN/Inf)
+  tests/test_stage_a_engine_config.py    24 passed — N-01…N-04, приоритет env
+                                             над JSON, отсутствующее/
+                                             неизвестное ACTIVE_STRATEGY,
+                                             fail-closed битого engine.json
+  tests/test_stage_a_schema.py           18 passed — T-16 (равные/инвертир.
+                                             RSI-пороги), T-17 (валидность
+                                             конфигурации != готовность данных)
+  tests/test_stage_a_legacy_profiles.py  11 passed — G-5 идентичность
+                                             исторических профилей baseline,
+                                             FORCE_TRADE не перенесён
+  tests/test_stage_a_legacy_adapter.py   31 passed — G-1 golden signals,
+                                             идентичность моста, изоляция
+                                             baseline-состояния, реестр
+                                             regression-only
+  tests/test_stage_a_attribution.py      22 passed — атрибуция новых объектов,
+                                             чтение старых записей (файл
+                                             байт-неизменен), отсутствие
+                                             фиктивной атрибуции, fail-closed
+                                             без контекста (Stage A.1: контекст
+                                             передаётся ЯВНО)
+
+5. АДАПТАЦИИ ТЕСТОВ STAGE A ПОД ИСПРАВЛЕННУЮ АРХИТЕКТУРУЮ (прозрачно)
+--------------------------------------------------------------------------------
+Только файл tests/test_stage_a_attribution.py (три правки, количество тестов
+сохранено — 22; эталоны golden/профилей НЕ менялись):
+
+  * удалён импорт set_current_context / get_current_context /
+    clear_current_context и autouse-фикстура очистки глобального состояния —
+    этих функций в attribution.py больше НЕ СУЩЕСТВУЕТ (замечание №3);
+  * test_current_context_is_used_when_set заменён на
+    test_explicit_context_is_the_only_source: проверяет ОТСУТСТВИЕ глобального
+    API и корректность явной передачи контекста (та же семантика «контекст
+    используется»);
+  * проверки «нет контекста -> явная ошибка» приведены к новой сигнатуре:
+    stamp(record, None) -> AttributionRequiredError; stamp(record) -> TypeError;
+    append_attributed_csv_row(..., context=None) -> AttributionRequiredError.
+
+6. НОВЫЕ CORRECTIVE-ТЕСТЫ STAGE A.1 (81)
+--------------------------------------------------------------------------------
+6.1. tests/test_stage_a1_config_immutability.py — 48 passed (замечание №1)
+  Обязательные проверки задания Stage A.1 (все выполнены):
+    * попытка изменить верхнеуровневый params ........ FrozenInstanceError /
+      TypeError (item assignment) — PASS
+    * попытка изменить вложенный словарь ............. TypeError (4 теста,
+      в т.ч. запись через приватное хранилище _data заблокирована
+      MappingProxyType) — PASS
+    * попытка изменить вложенный список .............. TypeError /
+      AttributeError (item assignment, append, вложенные списки) — PASS
+    * попытка изменить metadata ...................... FrozenInstanceError /
+      TypeError, вложенные структуры metadata защищены — PASS
+    * изменение исходного словаря после создания ..... конфигурация и её
+      config_hash не меняются (глубокая копия при создании) — PASS
+    * попытка изменить config_hash ................... FrozenInstanceError —
+      PASS
+    * одинаковая конфигурация после сериализации -> одинаковый hash — PASS
+      (JSON round-trip, независимость от порядка ключей)
+    * изменение значимого параметра -> новый hash — PASS (в т.ч. вложенные
+      параметры)
+    * round-trip сериализация не меняет семантику параметров — PASS (as_dict
+      -> json.dumps -> json.loads -> новая конфигурация; множества ->
+      отсортированные списки — документированная нормализация, совпадающая с
+      нормализацией config_hash; hash сохраняется даже для множеств)
+  Дополнительно:
+    * config_hash == recompute_config_hash() по ФАКТИЧЕСКИ сохранённым
+      параметрам; hash(StrategyConfig) хешируем; deepcopy сохраняет
+      заморозку; ImmutableList == list/tuple (семантическое равенство);
+      set -> frozenset; совместимость с потребителями (Strategy.get_config,
+      engine_config, legacy adapter bridge через params.items()).
+
+6.2. tests/test_stage_a1_attribution_explicit.py — 33 passed (замечания №2, №3)
+  Обязательные проверки замечания №3 (все 8 выполнены):
+    1. две стратегии с разными strategy_id и config_hash — PASS;
+    2. одновременное создание объектов обеих стратегий (чередование +
+       4 потока × 50 объектов) — PASS;
+    3. объекты получают только собственную атрибуцию — PASS;
+    4. отсутствие перекрёстного загрязнения (в т.ч. одна и та же запись,
+       штампованная обеими стратегиями; исходная запись не мутируется) — PASS;
+    5. отсутствие контекста -> явная ошибка (None -> AttributionRequiredError;
+       пропущенный аргумент -> TypeError) — PASS;
+    6. вложенные вызовы не меняют контекст вызывающего кода — PASS
+       (контекст хранится в локальной переменной/фабрике вызывающего);
+    7. исключение при создании объекта не оставляет устаревший контекст —
+       PASS (контекст фабрики неизменяем; после исключения фабрика
+       продолжает работу со своим контекстом);
+    8. повторный запуск не зависит от порядка предыдущих тестов — PASS
+       (сценарий в двух порядках даёт идентичные результаты; файлы
+       прогонялись в обоих порядках и по отдельности — 81 passed в каждом).
+  Замечание №2:
+    * глобального API не существует (structural check) — PASS;
+    * единый явный механизм: AttributionContext.from_config(StrategyConfig),
+      stamp(record, context), stamp(record, StrategyConfig),
+      AttributionFactory(context | StrategyConfig) — PASS;
+    * все типы НОВЫХ объектов движка атрибутируются: new_event,
+      new_virtual_order, new_virtual_position, append_csv_row,
+      append_jsonl_row — PASS (в payload нет UNKNOWN/пустых/случайных
+      значений);
+    * конфликт полей атрибуции с контекстом -> объект НЕ создаётся
+      (включая конфликтную строку CSV: файл не изменён) — PASS;
+    * старые объекты: чтение старых CSV/JSONL безопасно (None/False),
+      файлы байт-неизменны, атрибуция не дописывается, смешанный журнал
+      читается корректно — PASS;
+    * граница Stage A: logger.TRADE_FIELDS не содержит полей атрибуции;
+      имена исторических журналов в исходнике logger.py не изменены;
+      main.py/execution.py/logger.py/order_ledger.py/strategy.py/config.py
+      не импортируют/не упоминают атрибуцию нового движка — PASS.
+
+7. СМЕШАННЫЙ ЗАПУСК СТАРЫХ И НОВЫХ ТЕСТОВ (порядко-независимость)
+--------------------------------------------------------------------------------
+Чередование новых corrective/Stage A тестов с baseline-тестами:
+  python -m pytest tests/test_stage_a1_attribution_explicit.py test_main.py
+           tests/test_stage_a1_config_immutability.py test_persistence.py
+           tests/test_stage_a_attribution.py test_fail_closed.py
+           tests/test_stage_a_strategy_api.py test_strategy.py
+           tests/test_stage_a_engine_config.py test_order_ledger.py
+  -> 200 passed, 0 failed: взаимного влияния нет.
+
+Порядок corrective-файлов:
+  (attribution, immutability) -> 81 passed; (immutability, attribution) ->
+  81 passed; каждый файл по отдельности -> 48/33 passed.
+
+8. ЦЕЛОСТНОСТЬ ФАЙЛОВ (SHA256, см. FILE_MANIFEST_SHA256.txt)
+--------------------------------------------------------------------------------
+  * В КОДЕ ПАКЕТА (candidate/): 163 файла байт-неизменны относительно
+    исходного Stage A (кроме изменённых/добавленных, см. ниже); изменены
+    ТОЛЬКО 4 файла: candidate/strategy_api.py,
+    candidate/attribution.py, candidate/engine_config.py,
+    candidate/tests/test_stage_a_attribution.py; добавлены ТОЛЬКО 2 файла:
+    candidate/tests/test_stage_a1_config_immutability.py,
+    candidate/tests/test_stage_a1_attribution_explicit.py;
+  * НА КОРНЕ ПАКЕТА (документация Stage A.1): переписаны TEST_RESULTS.txt и
+    ROLLBACK_INSTRUCTIONS.md (версии Stage A сохранены рядом как
+    TEST_RESULTS_STAGE_A.txt и ROLLBACK_INSTRUCTIONS_STAGE_A.md); добавлены
+    7 файлов: CORRECTIVE_IMPLEMENTATION_REPORT.md,
+    BASELINE_VS_STAGE_A_1_DIFF.md, APPENDIX_FULL_DIFF.patch,
+    README_STAGE_A_1.md, FILE_MANIFEST_SHA256.txt (новый манифест) и
+    сохранённые копии Stage A (TEST_RESULTS_STAGE_A.txt,
+    ROLLBACK_INSTRUCTIONS_STAGE_A.md, FILE_MANIFEST_SHA256_STAGE_A.txt);
+  * ИТОГО по манифесту (автоматическая сверка с исходным Stage A):
+    188 файлов = 6 [M] (4 в candidate/ + 2 корневых отчёта) +
+    9 [A] (2 corrective-теста + 7 корневых документов) +
+    173 [ ] байт-неизменных;
+  * все 14 production-файлов baseline (main.py, execution.py, logger.py,
+    order_ledger.py, strategy.py, config.py, risk_manager.py, screener.py,
+    telegram_bot.py, tinkoff_client.py, safe_start.py, build_safety.py,
+    enable_sandbox_execution.py, requirements.txt) байт-идентичны
+    коммиту baseline 884cefd — проверено SHA256;
+  * FORCE_TRADE: в новой архитектуре отсутствует (проверка G-5 в составе
+    128 Stage A тестов — PASS); config.PROFILE baseline не изменён.
+
+9. СВОДКА ПО КРИТЕРИЯМ ПРИЁМКИ STAGE A.1 (раздел 9 ТЗ)
+--------------------------------------------------------------------------------
+  StrategyConfig действительно immutable (вкл. вложенные структуры) .. PASS
+  config_hash всегда соответствует фактической конфигурации .......... PASS
+  Атрибуция нового движка передаётся явно и проверяется .............. PASS
+  Глобальное изменяемое состояние не используется .................... PASS
+    (удалено; структурная проверка отсутствия API в тестах)
+  Нет перекрёстной атрибуции при параллельной работе ................. PASS
+  Старые объекты остаются совместимыми ............................... PASS
+  Старый production-код Samsung V4 не изменён ........................ PASS
+    (14 файлов байт-идентичны baseline)
+  Все baseline и Stage A тесты проходят .............................. PASS
+    (771 + 128; новые ошибки: 0)
+  Все новые corrective tests проходят ................................ PASS (81)
+  Нет новых регрессий ................................................ PASS
+  Результат поставлен одним ZIP ...................................... YES
+
+10. СРЕДА ЗАПУСКА ДЛЯ ВОСПРОИЗВЕДЕНИЯ
+--------------------------------------------------------------------------------
+  cd candidate
+  python -m pytest            # полный набор (980 passed)
+  python -m pytest tests      # канонический поднабор (460 passed)
+  python -m pytest tests/test_stage_a1_config_immutability.py \
+           tests/test_stage_a1_attribution_explicit.py   # corrective (81)
+
+Все прогоны выполнены offline; никаких реальных сетевых обращений,
+брокерских подключений, Sandbox-заявок и LIVE-заявок не было.
+================================================================================
