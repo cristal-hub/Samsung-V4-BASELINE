@@ -1,0 +1,955 @@
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "C:\Users\Cristal\AppData\Local\Programs\Python\Python311\Lib\site-packages\telegram\ext\_utils\networkloop.py", line 115, in network_retry_loop
+    if not await do_action():
+           ^^^^^^^^^^^^^^^^^
+  File "C:\Users\Cristal\AppData\Local\Programs\Python\Python311\Lib\site-packages\telegram\ext\_utils\networkloop.py", line 108, in do_action
+    return action_cb_task.result()
+           ^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Cristal\AppData\Local\Programs\Python\Python311\Lib\site-packages\telegram\ext\_updater.py", line 376, in polling_action_cb
+    updates = await self.bot.get_updates(
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Cristal\AppData\Local\Programs\Python\Python311\Lib\site-packages\telegram\ext\_extbot.py", line 658, in get_updates
+    updates = await super().get_updates(
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Cristal\AppData\Local\Programs\Python\Python311\Lib\site-packages\telegram\_bot.py", line 4605, in get_updates
+    await self._post(
+  File "C:\Users\Cristal\AppData\Local\Programs\Python\Python311\Lib\site-packages\telegram\_bot.py", line 691, in _post
+    return await self._do_post(
+           ^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Cristal\AppData\Local\Programs\Python\Python311\Lib\site-packages\telegram\ext\_extbot.py", line 362, in _do_post
+    return await super()._do_post(
+           ^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Cristal\AppData\Local\Programs\Python\Python311\Lib\site-packages\telegram\_bot.py", line 720, in _do_post
+    result = await request.post(
+             ^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Cristal\AppData\Local\Programs\Python\Python311\Lib\site-packages\telegram\request\_baserequest.py", line 202, in post
+    result = await self._request_wrapper(
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Cristal\AppData\Local\Programs\Python\Python311\Lib\site-packages\telegram\request\_baserequest.py", line 334, in _request_wrapper
+    code, payload = await self.do_request(
+                    ^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Cristal\AppData\Local\Programs\Python\Python311\Lib\site-packages\telegram\request\_httpxrequest.py", line 317, in do_request
+    raise NetworkError(f"httpx.{err.__class__.__name__}: {err}") from err
+telegram.error.NetworkError: httpx.ConnectError: All connection attempts failed
+2026-11-26 15:54:59,025 - INFO - c8fba904fb41627c1f48569f9d3e0731 GetLastPrices
+2026-11-26 15:54:59,058 - INFO - 4b1578d3bbfad07a38eb162ec4cb43ae GetSandboxPortfolio
+2026-11-26 15:54:59,065 - INFO - [reconcile] Все позиции совпадают (4 активных).
+2026-11-26 15:54:59,095 - INFO - 9ecd42ef140f148a85213221677681ed GetSandboxPortfolio
+2026-11-26 15:54:59,197 - INFO - 3dc5ab56dfc27bc409126e4602c52eda GetCandles
+2026-11-26 15:54:59,320 - INFO - 1737f1910242628716dba03d6c49af50 GetCandles
+2026-11-26 15:54:59,417 - INFO - [DEBUG MA] fast_prev=6.1250 fast_last=6.1500 slow_prev=6.1333 slow_last=6.1333 len=406
+2026-11-26 15:54:59,443 - INFO - bbae04fc3e50d985754f00baf72e1668 GetSandboxPortfolio
+2026-11-26 15:54:59,483 - INFO - 37eb3118052ae8769ee6cb9b71b262b0 GetSandboxPortfolio
+2026-11-26 15:54:59,545 - INFO - 1db2b9254c8a8bdbe4148fb039ace525 GetLastPrices
+2026-11-26 15:54:59,603 - INFO - cee8f89e2ef3c1176e5e14314de45c58 GetLastPrices
+2026-11-26 15:54:59,664 - INFO - acf30446a92e1f6daea7a4d2911bd645 GetLastPrices
+2026-11-26 15:54:59,751 - INFO - 32e1cfdfd4f4cf23b63b9272e91f0581 GetLastPrices
+2026-11-26 15:54:59,752 - INFO - EUTR: размер позиции 0, пропуск
+2026-11-26 15:54:59,752 - INFO - LSRG: позиция уже открыта/в неопределённости, пропуск
+2026-11-26 15:54:59,753 - INFO - MVID: позиция уже открыта/в неопределённости, пропуск
+2026-11-26 15:54:59,843 - INFO - 52a5a3f48b3c783636b956275d92f145 GetCandles
+2026-11-26 15:54:59,952 - INFO - 1a7bbb38f68daec3b69f4be524a62452 GetCandles
+2026-11-26 15:55:00,038 - INFO - [DEBUG MA] fast_prev=280.6000 fast_last=280.4000 slow_prev=280.5333 slow_last=280.6000 len=406
+2026-11-26 15:55:00,040 - INFO - SMLT: SELL без позиции — шорт запрещён
+2026-11-26 15:55:00,040 - INFO - VKCO: позиция уже открыта/в неопределённости, пропуск
+2026-11-26 15:55:00,115 - INFO - a176fa8fc410209f09e246c6c8d36de5 GetCandles
+2026-11-26 15:55:00,217 - INFO - cde104a1791739aed7905f20392088e4 GetCandles
+2026-11-26 15:55:00,296 - INFO - [DEBUG MA] fast_prev=21.3100 fast_last=21.3400 slow_prev=21.3200 slow_last=21.3200 len=402
+2026-11-26 15:55:00,321 - INFO - bc4a48f927c646ba13a83067dc31248d GetSandboxPortfolio
+2026-11-26 15:55:00,379 - INFO - 055a137d872471bad405bda741a49aec GetSandboxPortfolio
+2026-11-26 15:55:00,447 - INFO - 67dd90609ccb4d849afdccab16daa173 GetLastPrices
+2026-11-26 15:55:00,530 - INFO - 2844b44d89572fd38e424d587d8e4da7 GetLastPrices
+2026-11-26 15:55:00,586 - INFO - 67e9a7b195403e42186b99f3771d8ac6 GetLastPrices
+2026-11-26 15:55:00,652 - INFO - 1612a8c2cee54bf2e2522aee47fa8921 GetLastPrices
+2026-11-26 15:55:00,654 - INFO - ETLN: размер позиции 0, пропуск
+2026-11-26 15:55:00,729 - INFO - da7ed0578cd0d1489a59f906c6935c34 GetCandles
+2026-11-26 15:55:00,832 - INFO - b77d7ce675d5b9ff6ef72ee2bae1d268 GetCandles
+2026-11-26 15:55:00,925 - INFO - [DEBUG MA] fast_prev=19.9000 fast_last=19.8800 slow_prev=19.9267 slow_last=19.9000 len=403
+2026-11-26 15:55:00,925 - INFO - UWGN: HOLD (Нет пересечения MA)
+2026-11-26 15:55:00,925 - INFO - WUSH: позиция уже открыта/в неопределённости, пропуск
+2026-11-26 15:55:01,027 - INFO - 0679fb2c63453a7535fa59b2a13ed114 GetCandles
+2026-11-26 15:55:01,124 - INFO - ae2e2295889571f67062af88222ace3b GetCandles
+2026-11-26 15:55:01,214 - INFO - [DEBUG MA] fast_prev=59.6750 fast_last=59.8000 slow_prev=59.6500 slow_last=59.7167 len=392
+2026-11-26 15:55:01,214 - INFO - IVAT: HOLD (Нет пересечения MA)
+2026-11-26 15:55:01,303 - INFO - ecc581c9e4934fbe8489ce9696d404b0 GetCandles
+2026-11-26 15:55:01,409 - INFO - eae9e80e6bb5c51f72daaa6c4fc07dae GetCandles
+2026-11-26 15:55:01,496 - INFO - [DEBUG MA] fast_prev=32.9900 fast_last=33.0400 slow_prev=32.9733 slow_last=33.0033 len=403
+2026-11-26 15:55:01,496 - INFO - SELG: HOLD (Нет пересечения MA)
+2026-11-26 15:55:06,111 - ERROR - Exception happened while polling for updates.
+Traceback (most recent call last):
+  File "C:\Users\Cristal\AppData\Local\Programs\Python\Python311\Lib\site-packages\httpx\_transports\default.py", line 101, in map_httpcore_exceptions
+    yield
+  File "C:\Users\Cristal\AppData\Local\Programs\Python\Python311\Lib\site-packages\httpx\_transports\default.py", line 394, in handle_async_request
+    resp = await self._pool.handle_async_request(req)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Cristal\AppData\Local\Programs\Python\Python311\Lib\site-packages\httpcore\_async\connection_pool.py", line 256, in handle_async_request
+    raise exc from None
+  File "C:\Users\Cristal\AppData\Local\Programs\Python\Python311\Lib\site-packages\httpcore\_async\connection_pool.py", line 236, in handle_async_request
+    response = await connection.handle_async_request(
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Cristal\AppData\Local\Programs\Python\Python311\Lib\site-packages\httpcore\_async\connection.py", line 101, in handle_async_request
+    raise exc
+  File "C:\Users\Cristal\AppData\Local\Programs\Python\Python311\Lib\site-packages\httpcore\_async\connection.py", line 78, in handle_async_request
+    stream = await self._connect(request)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Cristal\AppData\Local\Programs\Python\Python311\Lib\site-packages\httpcore\_async\connection.py", line 124, in _connect
+    stream = await self._network_backend.connect_tcp(**kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Cristal\AppData\Local\Programs\Python\Python311\Lib\site-packages\httpcore\_backends\auto.py", line 31, in connect_tcp
+    return await self._backend.connect_tcp(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Cristal\AppData\Local\Programs\Python\Python311\Lib\site-packages\httpcore\_backends\anyio.py", line 113, in connect_tcp
+    with map_exceptions(exc_map):
+  File "C:\Users\Cristal\AppData\Local\Programs\Python\Python311\Lib\contextlib.py", line 155, in __exit__
+    self.gen.throw(typ, value, traceback)
+  File "C:\Users\Cristal\AppData\Local\Programs\Python\Python311\Lib\site-packages\httpcore\_exceptions.py", line 14, in map_exceptions
+    raise to_exc(exc) from exc
+httpcore.ConnectError: All connection attempts failed
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "C:\Users\Cristal\AppData\Local\Programs\Python\Python311\Lib\site-packages\telegram\request\_httpxrequest.py", line 293, in do_request
+    res = await self._client.request(
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Cristal\AppData\Local\Programs\Python\Python311\Lib\site-packages\httpx\_client.py", line 1540, in request
+    return await self.send(request, auth=auth, follow_redirects=follow_redirects)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Cristal\AppData\Local\Programs\Python\Python311\Lib\site-packages\httpx\_client.py", line 1629, in send
+    response = await self._send_handling_auth(
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Cristal\AppData\Local\Programs\Python\Python311\Lib\site-packages\httpx\_client.py", line 1657, in _send_handling_auth
+    response = await self._send_handling_redirects(
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Cristal\AppData\Local\Programs\Python\Python311\Lib\site-packages\httpx\_client.py", line 1694, in _send_handling_redirects
+    response = await self._send_single_request(request)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Cristal\AppData\Local\Programs\Python\Python311\Lib\site-packages\httpx\_client.py", line 1730, in _send_single_request
+    response = await transport.handle_async_request(request)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Cristal\AppData\Local\Programs\Python\Python311\Lib\site-packages\httpx\_transports\default.py", line 393, in handle_async_request
+    with map_httpcore_exceptions():
+  File "C:\Users\Cristal\AppData\Local\Programs\Python\Python311\Lib\contextlib.py", line 155, in __exit__
+    self.gen.throw(typ, value, traceback)
+  File "C:\Users\Cristal\AppData\Local\Programs\Python\Python311\Lib\site-packages\httpx\_transports\default.py", line 118, in map_httpcore_exceptions
+    raise mapped_exc(message) from exc
+httpx.ConnectError: All connection attempts failed
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "C:\Users\Cristal\AppData\Local\Programs\Python\Python311\Lib\site-packages\telegram\ext\_utils\networkloop.py", line 115, in network_retry_loop
+    if not await do_action():
+           ^^^^^^^^^^^^^^^^^
+  File "C:\Users\Cristal\AppData\Local\Programs\Python\Python311\Lib\site-packages\telegram\ext\_utils\networkloop.py", line 108, in do_action
+    return action_cb_task.result()
+           ^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Cristal\AppData\Local\Programs\Python\Python311\Lib\site-packages\telegram\ext\_updater.py", line 376, in polling_action_cb
+    updates = await self.bot.get_updates(
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Cristal\AppData\Local\Programs\Python\Python311\Lib\site-packages\telegram\ext\_extbot.py", line 658, in get_updates
+    updates = await super().get_updates(
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Cristal\AppData\Local\Programs\Python\Python311\Lib\site-packages\telegram\_bot.py", line 4605, in get_updates
+    await self._post(
+  File "C:\Users\Cristal\AppData\Local\Programs\Python\Python311\Lib\site-packages\telegram\_bot.py", line 691, in _post
+    return await self._do_post(
+           ^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Cristal\AppData\Local\Programs\Python\Python311\Lib\site-packages\telegram\ext\_extbot.py", line 362, in _do_post
+    return await super()._do_post(
+           ^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Cristal\AppData\Local\Programs\Python\Python311\Lib\site-packages\telegram\_bot.py", line 720, in _do_post
+    result = await request.post(
+             ^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Cristal\AppData\Local\Programs\Python\Python311\Lib\site-packages\telegram\request\_baserequest.py", line 202, in post
+    result = await self._request_wrapper(
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Cristal\AppData\Local\Programs\Python\Python311\Lib\site-packages\telegram\request\_baserequest.py", line 334, in _request_wrapper
+    code, payload = await self.do_request(
+                    ^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Cristal\AppData\Local\Programs\Python\Python311\Lib\site-packages\telegram\request\_httpxrequest.py", line 317, in do_request
+    raise NetworkError(f"httpx.{err.__class__.__name__}: {err}") from err
+telegram.error.NetworkError: httpx.ConnectError: All connection attempts failed
+2026-11-26 15:55:17,586 - WARNING - [tg-watchdog] Telegram недоступен (2/3): TimeoutError: TimeoutError()
+2026-11-26 15:55:31,557 - INFO - 4b9cdafbced0fafd50809bede19ba888 GetLastPrices
+2026-11-26 15:55:31,598 - INFO - 60f0a5c6ac464acfa21645eb3a21c2fe GetSandboxPortfolio
+2026-11-26 15:55:31,604 - INFO - [reconcile] Все позиции совпадают (4 активных).
+2026-11-26 15:55:31,629 - INFO - 4d535d6822424887644c9a89f713cd4c GetSandboxPortfolio
+2026-11-26 15:55:31,747 - INFO - d86654fa6b5b745177355b04dbcc920e GetCandles
+2026-11-26 15:55:31,894 - INFO - c4df4436f980534b98f4e4aea56d3a77 GetCandles
+2026-11-26 15:55:31,973 - INFO - [DEBUG MA] fast_prev=6.1500 fast_last=6.1500 slow_prev=6.1333 slow_last=6.1500 len=406
+2026-11-26 15:55:31,973 - INFO - EUTR: HOLD (Нет пересечения MA)
+2026-11-26 15:55:31,974 - INFO - LSRG: позиция уже открыта/в неопределённости, пропуск
+2026-11-26 15:55:31,975 - INFO - MVID: позиция уже открыта/в неопределённости, пропуск
+2026-11-26 15:55:32,054 - INFO - 1a76ba48de85de02d203a81f62a7aabc GetCandles
+2026-11-26 15:55:32,151 - INFO - 4f5d1d73d5db16cdd27e3626f69dd0d2 GetCandles
+2026-11-26 15:55:32,234 - INFO - [DEBUG MA] fast_prev=280.4000 fast_last=280.8500 slow_prev=280.6000 slow_last=280.6333 len=406
+2026-11-26 15:55:32,268 - INFO - 78108f947463b8519b9251cde7242bc4 GetSandboxPortfolio
+2026-11-26 15:55:32,284 - ERROR - Exception happened while polling for updates.
+Traceback (most recent call last):
+  File "C:\Users\Cristal\AppData\Local\Programs\Python\Python311\Lib\site-packages\httpx\_transports\default.py", line 101, in map_httpcore_exceptions
+    yield
+  File "C:\Users\Cristal\AppData\Local\Programs\Python\Python311\Lib\site-packages\httpx\_transports\default.py", line 394, in handle_async_request
+    resp = await self._pool.handle_async_request(req)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Cristal\AppData\Local\Programs\Python\Python311\Lib\site-packages\httpcore\_async\connection_pool.py", line 256, in handle_async_request
+    raise exc from None
+  File "C:\Users\Cristal\AppData\Local\Programs\Python\Python311\Lib\site-packages\httpcore\_async\connection_pool.py", line 236, in handle_async_request
+    response = await connection.handle_async_request(
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Cristal\AppData\Local\Programs\Python\Python311\Lib\site-packages\httpcore\_async\connection.py", line 101, in handle_async_request
+    raise exc
+  File "C:\Users\Cristal\AppData\Local\Programs\Python\Python311\Lib\site-packages\httpcore\_async\connection.py", line 78, in handle_async_request
+    stream = await self._connect(request)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Cristal\AppData\Local\Programs\Python\Python311\Lib\site-packages\httpcore\_async\connection.py", line 124, in _connect
+    stream = await self._network_backend.connect_tcp(**kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Cristal\AppData\Local\Programs\Python\Python311\Lib\site-packages\httpcore\_backends\auto.py", line 31, in connect_tcp
+    return await self._backend.connect_tcp(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Cristal\AppData\Local\Programs\Python\Python311\Lib\site-packages\httpcore\_backends\anyio.py", line 113, in connect_tcp
+    with map_exceptions(exc_map):
+  File "C:\Users\Cristal\AppData\Local\Programs\Python\Python311\Lib\contextlib.py", line 155, in __exit__
+    self.gen.throw(typ, value, traceback)
+  File "C:\Users\Cristal\AppData\Local\Programs\Python\Python311\Lib\site-packages\httpcore\_exceptions.py", line 14, in map_exceptions
+    raise to_exc(exc) from exc
+httpcore.ConnectError: All connection attempts failed
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "C:\Users\Cristal\AppData\Local\Programs\Python\Python311\Lib\site-packages\telegram\request\_httpxrequest.py", line 293, in do_request
+    res = await self._client.request(
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Cristal\AppData\Local\Programs\Python\Python311\Lib\site-packages\httpx\_client.py", line 1540, in request
+    return await self.send(request, auth=auth, follow_redirects=follow_redirects)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Cristal\AppData\Local\Programs\Python\Python311\Lib\site-packages\httpx\_client.py", line 1629, in send
+    response = await self._send_handling_auth(
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Cristal\AppData\Local\Programs\Python\Python311\Lib\site-packages\httpx\_client.py", line 1657, in _send_handling_auth
+    response = await self._send_handling_redirects(
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Cristal\AppData\Local\Programs\Python\Python311\Lib\site-packages\httpx\_client.py", line 1694, in _send_handling_redirects
+    response = await self._send_single_request(request)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Cristal\AppData\Local\Programs\Python\Python311\Lib\site-packages\httpx\_client.py", line 1730, in _send_single_request
+    response = await transport.handle_async_request(request)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Cristal\AppData\Local\Programs\Python\Python311\Lib\site-packages\httpx\_transports\default.py", line 393, in handle_async_request
+    with map_httpcore_exceptions():
+  File "C:\Users\Cristal\AppData\Local\Programs\Python\Python311\Lib\contextlib.py", line 155, in __exit__
+    self.gen.throw(typ, value, traceback)
+  File "C:\Users\Cristal\AppData\Local\Programs\Python\Python311\Lib\site-packages\httpx\_transports\default.py", line 118, in map_httpcore_exceptions
+    raise mapped_exc(message) from exc
+httpx.ConnectError: All connection attempts failed
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "C:\Users\Cristal\AppData\Local\Programs\Python\Python311\Lib\site-packages\telegram\ext\_utils\networkloop.py", line 115, in network_retry_loop
+    if not await do_action():
+           ^^^^^^^^^^^^^^^^^
+  File "C:\Users\Cristal\AppData\Local\Programs\Python\Python311\Lib\site-packages\telegram\ext\_utils\networkloop.py", line 108, in do_action
+    return action_cb_task.result()
+           ^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Cristal\AppData\Local\Programs\Python\Python311\Lib\site-packages\telegram\ext\_updater.py", line 376, in polling_action_cb
+    updates = await self.bot.get_updates(
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Cristal\AppData\Local\Programs\Python\Python311\Lib\site-packages\telegram\ext\_extbot.py", line 658, in get_updates
+    updates = await super().get_updates(
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Cristal\AppData\Local\Programs\Python\Python311\Lib\site-packages\telegram\_bot.py", line 4605, in get_updates
+    await self._post(
+  File "C:\Users\Cristal\AppData\Local\Programs\Python\Python311\Lib\site-packages\telegram\_bot.py", line 691, in _post
+    return await self._do_post(
+           ^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Cristal\AppData\Local\Programs\Python\Python311\Lib\site-packages\telegram\ext\_extbot.py", line 362, in _do_post
+    return await super()._do_post(
+           ^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Cristal\AppData\Local\Programs\Python\Python311\Lib\site-packages\telegram\_bot.py", line 720, in _do_post
+    result = await request.post(
+             ^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Cristal\AppData\Local\Programs\Python\Python311\Lib\site-packages\telegram\request\_baserequest.py", line 202, in post
+    result = await self._request_wrapper(
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Cristal\AppData\Local\Programs\Python\Python311\Lib\site-packages\telegram\request\_baserequest.py", line 334, in _request_wrapper
+    code, payload = await self.do_request(
+                    ^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Cristal\AppData\Local\Programs\Python\Python311\Lib\site-packages\telegram\request\_httpxrequest.py", line 317, in do_request
+    raise NetworkError(f"httpx.{err.__class__.__name__}: {err}") from err
+telegram.error.NetworkError: httpx.ConnectError: All connection attempts failed
+2026-11-26 15:55:32,318 - INFO - 9b65773c56fcb7ba41ce45ba8c066b86 GetSandboxPortfolio
+2026-11-26 15:55:32,381 - INFO - 0a5818e97ad1fd4530b467c389768d3c GetLastPrices
+2026-11-26 15:55:32,453 - INFO - b197621f7ca2ecdad41c76f4cc3d9347 GetLastPrices
+2026-11-26 15:55:32,521 - INFO - 55818ac15427cb4b5e84a35eea79b9ce GetLastPrices
+2026-11-26 15:55:32,587 - INFO - 1d4f5809be46e4e92a0d7ad40581c737 GetLastPrices
+2026-11-26 15:55:32,588 - INFO - SMLT: размер позиции 0, пропуск
+2026-11-26 15:55:32,589 - INFO - VKCO: позиция уже открыта/в неопределённости, пропуск
+2026-11-26 15:55:32,700 - INFO - 0e5473987677c7f0c13d613f24469c6d GetCandles
+2026-11-26 15:55:32,807 - INFO - a0153818771a4d033af8036cbfe2125b GetCandles
+2026-11-26 15:55:32,885 - INFO - [DEBUG MA] fast_prev=21.3400 fast_last=21.3400 slow_prev=21.3200 slow_last=21.3400 len=404
+2026-11-26 15:55:32,886 - INFO - ETLN: HOLD (Нет пересечения MA)
+2026-11-26 15:55:32,957 - INFO - c51f820085aff6ac5109d3d99d02e1e1 GetCandles
+2026-11-26 15:55:33,060 - INFO - dac772261e2947769c48de79e13eb7a9 GetCandles
+2026-11-26 15:55:33,140 - INFO - [DEBUG MA] fast_prev=19.8800 fast_last=19.9700 slow_prev=19.9000 slow_last=19.9333 len=405
+2026-11-26 15:55:33,164 - INFO - 2fb5ec4a2493b9cc70bbc25c6aa28faf GetSandboxPortfolio
+2026-11-26 15:55:33,197 - INFO - 522e98025af8614dc0d235d93c494331 GetSandboxPortfolio
+2026-11-26 15:55:33,269 - INFO - 6658f536d9a6a6db1902050a89bc9306 GetLastPrices
+2026-11-26 15:55:33,332 - INFO - 714e879b57a9a916b5f33846edf8d610 GetLastPrices
+2026-11-26 15:55:33,394 - INFO - 01a3377d30ca70cb20857c141cb78530 GetLastPrices
+2026-11-26 15:55:33,455 - INFO - 8a001b3eaeeb107f49d035729fc58d6e GetLastPrices
+2026-11-26 15:55:33,456 - INFO - UWGN: размер позиции 0, пропуск
+2026-11-26 15:55:33,456 - INFO - WUSH: позиция уже открыта/в неопределённости, пропуск
+2026-11-26 15:55:33,561 - INFO - 961a5f9f9646ac39a1322f07f39ca4e1 GetCandles
+2026-11-26 15:55:33,659 - INFO - 9636b2377350c9432fcf553ca8a98dd3 GetCandles
+2026-11-26 15:55:33,735 - INFO - [DEBUG MA] fast_prev=59.8000 fast_last=59.8500 slow_prev=59.7167 slow_last=59.8333 len=394
+2026-11-26 15:55:33,736 - INFO - IVAT: HOLD (Нет пересечения MA)
+2026-11-26 15:55:33,811 - INFO - cf9ee8b539e4731d02681eecee6bfcaa GetCandles
+2026-11-26 15:55:33,950 - INFO - 6a22a950886a71a78eaaccb308f809c9 GetCandles
+2026-11-26 15:55:34,029 - INFO - [DEBUG MA] fast_prev=33.0400 fast_last=33.0200 slow_prev=33.0033 slow_last=33.0300 len=404
+2026-11-26 15:55:34,030 - INFO - SELG: HOLD (MA↓, но фильтр MA100 не пройден)
+2026-11-26 15:56:00,962 - ERROR - Exception happened while polling for updates.
+Traceback (most recent call last):
+  File "C:\Users\Cristal\AppData\Local\Programs\Python\Python311\Lib\site-packages\httpx\_transports\default.py", line 101, in map_httpcore_exceptions
+    yield
+  File "C:\Users\Cristal\AppData\Local\Programs\Python\Python311\Lib\site-packages\httpx\_transports\default.py", line 394, in handle_async_request
+    resp = await self._pool.handle_async_request(req)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Cristal\AppData\Local\Programs\Python\Python311\Lib\site-packages\httpcore\_async\connection_pool.py", line 256, in handle_async_request
+    raise exc from None
+  File "C:\Users\Cristal\AppData\Local\Programs\Python\Python311\Lib\site-packages\httpcore\_async\connection_pool.py", line 236, in handle_async_request
+    response = await connection.handle_async_request(
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Cristal\AppData\Local\Programs\Python\Python311\Lib\site-packages\httpcore\_async\connection.py", line 101, in handle_async_request
+    raise exc
+  File "C:\Users\Cristal\AppData\Local\Programs\Python\Python311\Lib\site-packages\httpcore\_async\connection.py", line 78, in handle_async_request
+    stream = await self._connect(request)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Cristal\AppData\Local\Programs\Python\Python311\Lib\site-packages\httpcore\_async\connection.py", line 124, in _connect
+    stream = await self._network_backend.connect_tcp(**kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Cristal\AppData\Local\Programs\Python\Python311\Lib\site-packages\httpcore\_backends\auto.py", line 31, in connect_tcp
+    return await self._backend.connect_tcp(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Cristal\AppData\Local\Programs\Python\Python311\Lib\site-packages\httpcore\_backends\anyio.py", line 113, in connect_tcp
+    with map_exceptions(exc_map):
+  File "C:\Users\Cristal\AppData\Local\Programs\Python\Python311\Lib\contextlib.py", line 155, in __exit__
+    self.gen.throw(typ, value, traceback)
+  File "C:\Users\Cristal\AppData\Local\Programs\Python\Python311\Lib\site-packages\httpcore\_exceptions.py", line 14, in map_exceptions
+    raise to_exc(exc) from exc
+httpcore.ConnectError: All connection attempts failed
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "C:\Users\Cristal\AppData\Local\Programs\Python\Python311\Lib\site-packages\telegram\request\_httpxrequest.py", line 293, in do_request
+    res = await self._client.request(
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Cristal\AppData\Local\Programs\Python\Python311\Lib\site-packages\httpx\_client.py", line 1540, in request
+    return await self.send(request, auth=auth, follow_redirects=follow_redirects)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Cristal\AppData\Local\Programs\Python\Python311\Lib\site-packages\httpx\_client.py", line 1629, in send
+    response = await self._send_handling_auth(
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Cristal\AppData\Local\Programs\Python\Python311\Lib\site-packages\httpx\_client.py", line 1657, in _send_handling_auth
+    response = await self._send_handling_redirects(
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Cristal\AppData\Local\Programs\Python\Python311\Lib\site-packages\httpx\_client.py", line 1694, in _send_handling_redirects
+    response = await self._send_single_request(request)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Cristal\AppData\Local\Programs\Python\Python311\Lib\site-packages\httpx\_client.py", line 1730, in _send_single_request
+    response = await transport.handle_async_request(request)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Cristal\AppData\Local\Programs\Python\Python311\Lib\site-packages\httpx\_transports\default.py", line 393, in handle_async_request
+    with map_httpcore_exceptions():
+  File "C:\Users\Cristal\AppData\Local\Programs\Python\Python311\Lib\contextlib.py", line 155, in __exit__
+    self.gen.throw(typ, value, traceback)
+  File "C:\Users\Cristal\AppData\Local\Programs\Python\Python311\Lib\site-packages\httpx\_transports\default.py", line 118, in map_httpcore_exceptions
+    raise mapped_exc(message) from exc
+httpx.ConnectError: All connection attempts failed
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "C:\Users\Cristal\AppData\Local\Programs\Python\Python311\Lib\site-packages\telegram\ext\_utils\networkloop.py", line 115, in network_retry_loop
+    if not await do_action():
+           ^^^^^^^^^^^^^^^^^
+  File "C:\Users\Cristal\AppData\Local\Programs\Python\Python311\Lib\site-packages\telegram\ext\_utils\networkloop.py", line 108, in do_action
+    return action_cb_task.result()
+           ^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Cristal\AppData\Local\Programs\Python\Python311\Lib\site-packages\telegram\ext\_updater.py", line 376, in polling_action_cb
+    updates = await self.bot.get_updates(
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Cristal\AppData\Local\Programs\Python\Python311\Lib\site-packages\telegram\ext\_extbot.py", line 658, in get_updates
+    updates = await super().get_updates(
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Cristal\AppData\Local\Programs\Python\Python311\Lib\site-packages\telegram\_bot.py", line 4605, in get_updates
+    await self._post(
+  File "C:\Users\Cristal\AppData\Local\Programs\Python\Python311\Lib\site-packages\telegram\_bot.py", line 691, in _post
+    return await self._do_post(
+           ^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Cristal\AppData\Local\Programs\Python\Python311\Lib\site-packages\telegram\ext\_extbot.py", line 362, in _do_post
+    return await super()._do_post(
+           ^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Cristal\AppData\Local\Programs\Python\Python311\Lib\site-packages\telegram\_bot.py", line 720, in _do_post
+    result = await request.post(
+             ^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Cristal\AppData\Local\Programs\Python\Python311\Lib\site-packages\telegram\request\_baserequest.py", line 202, in post
+    result = await self._request_wrapper(
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Cristal\AppData\Local\Programs\Python\Python311\Lib\site-packages\telegram\request\_baserequest.py", line 334, in _request_wrapper
+    code, payload = await self.do_request(
+                    ^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Cristal\AppData\Local\Programs\Python\Python311\Lib\site-packages\telegram\request\_httpxrequest.py", line 317, in do_request
+    raise NetworkError(f"httpx.{err.__class__.__name__}: {err}") from err
+telegram.error.NetworkError: httpx.ConnectError: All connection attempts failed
+2026-11-26 15:56:04,105 - INFO - fac6768cf5bbe4bcfe588a5484a5aafc GetLastPrices
+2026-11-26 15:56:04,152 - INFO - 0817d86dbefd9eae588e64d59498a921 GetSandboxPortfolio
+2026-11-26 15:56:04,162 - INFO - [reconcile] Все позиции совпадают (4 активных).
+2026-11-26 15:56:04,187 - INFO - 7091d65eaf21d4abd974f32d710a2af2 GetSandboxPortfolio
+2026-11-26 15:56:04,290 - INFO - 33d6a2a10dc3072a07af8927e3ca8781 GetCandles
+2026-11-26 15:56:04,423 - INFO - 8229f8bb5381c79f6bafbde2f02f4cc3 GetCandles
+2026-11-26 15:56:04,544 - INFO - [DEBUG MA] fast_prev=6.1500 fast_last=6.1500 slow_prev=6.1333 slow_last=6.1500 len=406
+2026-11-26 15:56:04,545 - INFO - EUTR: HOLD (Нет пересечения MA)
+2026-11-26 15:56:04,545 - INFO - LSRG: позиция уже открыта/в неопределённости, пропуск
+2026-11-26 15:56:04,546 - INFO - MVID: позиция уже открыта/в неопределённости, пропуск
+2026-11-26 15:56:04,621 - INFO - e0d1da3df542179d31dc18b1ca9cac68 GetCandles
+2026-11-26 15:56:04,770 - INFO - e818830e44246523465055178132d734 GetCandles
+2026-11-26 15:56:04,863 - INFO - [DEBUG MA] fast_prev=280.4000 fast_last=280.8500 slow_prev=280.6000 slow_last=280.6333 len=406
+2026-11-26 15:56:04,908 - INFO - 0a86fbdb31ae00115197289c7d07c36b GetSandboxPortfolio
+2026-11-26 15:56:04,940 - INFO - c9c1ceaea9865a00dae4640789b99ac0 GetSandboxPortfolio
+2026-11-26 15:56:05,018 - INFO - 0b48f74449f80cffb95472ae878476c5 GetLastPrices
+2026-11-26 15:56:05,102 - INFO - 019aa503f1ef253699213d7c398c5361 GetLastPrices
+2026-11-26 15:56:05,179 - INFO - 4118507c7e3b2bcf50959b957262c2b4 GetLastPrices
+2026-11-26 15:56:05,256 - INFO - 15f25ecd091144f4567a68b1d7e29865 GetLastPrices
+2026-11-26 15:56:05,263 - INFO - SMLT: размер позиции 0, пропуск
+2026-11-26 15:56:05,264 - INFO - VKCO: позиция уже открыта/в неопределённости, пропуск
+2026-11-26 15:56:05,344 - INFO - 6e3215db2bad33cea5de3cab2f5e3296 GetCandles
+2026-11-26 15:56:05,522 - INFO - 61bad895a0a6b355e1bea1b052ab4aea GetCandles
+2026-11-26 15:56:05,720 - INFO - [DEBUG MA] fast_prev=21.3400 fast_last=21.3400 slow_prev=21.3200 slow_last=21.3400 len=404
+2026-11-26 15:56:05,760 - INFO - ETLN: HOLD (Нет пересечения MA)
+2026-11-26 15:56:05,956 - INFO - df386809be9b7c341bc9aafee8621264 GetCandles
+2026-11-26 15:56:06,151 - INFO - c67d22d3cc48a2605248839418744f2d GetCandles
+2026-11-26 15:56:06,348 - INFO - [DEBUG MA] fast_prev=19.8800 fast_last=19.9700 slow_prev=19.9000 slow_last=19.9333 len=405
+2026-11-26 15:56:06,436 - INFO - 6f5c04f7784408e98ddc3adb2c03012a GetSandboxPortfolio
+2026-11-26 15:56:06,486 - INFO - 89ceabca4391732d7760ef0e1ce8435d GetSandboxPortfolio
+2026-11-26 15:56:06,630 - INFO - ab1300398d7f7bdc5d73bdcff7728ccc GetLastPrices
+2026-11-26 15:56:06,704 - INFO - 093df6badd303b3c7d8e97be780e57a3 GetLastPrices
+2026-11-26 15:56:06,790 - INFO - 0e0ed6e52103f4b285e177955216b1c9 GetLastPrices
+2026-11-26 15:56:06,853 - INFO - 26bc805481d0107d4f3cd8c0909b6362 GetLastPrices
+2026-11-26 15:56:06,871 - INFO - UWGN: размер позиции 0, пропуск
+2026-11-26 15:56:06,872 - INFO - WUSH: позиция уже открыта/в неопределённости, пропуск
+2026-11-26 15:56:06,989 - INFO - b065511a73954b2f14a5d939456b9be6 GetCandles
+2026-11-26 15:56:07,265 - INFO - b3f23c500927e7aaf32d55178a4c51fc GetCandles
+2026-11-26 15:56:07,439 - INFO - [DEBUG MA] fast_prev=59.8000 fast_last=59.8500 slow_prev=59.7167 slow_last=59.8333 len=394
+2026-11-26 15:56:07,440 - INFO - IVAT: HOLD (Нет пересечения MA)
+2026-11-26 15:56:07,529 - INFO - 23dc09f5616761c791688818ddccadeb GetCandles
+2026-11-26 15:56:07,657 - INFO - 2a356df67f6fe32a5a1d4e092f4914a4 GetCandles
+2026-11-26 15:56:07,851 - INFO - [DEBUG MA] fast_prev=33.0400 fast_last=33.0200 slow_prev=33.0033 slow_last=33.0300 len=404
+2026-11-26 15:56:07,856 - INFO - SELG: HOLD (MA↓, но фильтр MA100 не пройден)
+2026-11-26 15:56:17,761 - INFO - [tg-watchdog] Telegram восстановлен после 2 неудач.
+2026-11-26 15:56:37,963 - INFO - 511fc7103a32fde811171955a0d35080 GetLastPrices
+2026-11-26 15:56:37,992 - INFO - 5ec430bf5ba7733baf3baf414a3fb8ce GetSandboxPortfolio
+2026-11-26 15:56:37,998 - INFO - [reconcile] Все позиции совпадают (4 активных).
+2026-11-26 15:56:38,024 - INFO - 144133457ef8c214d8e22197961391e4 GetSandboxPortfolio
+2026-11-26 15:56:38,119 - INFO - d284af0496692505e881f5f4866f3013 GetCandles
+2026-11-26 15:56:38,218 - INFO - df95bb97089b1c20098fa36241f4ad13 GetCandles
+2026-11-26 15:56:38,288 - INFO - [DEBUG MA] fast_prev=6.1500 fast_last=6.1500 slow_prev=6.1333 slow_last=6.1500 len=406
+2026-11-26 15:56:38,289 - INFO - EUTR: HOLD (Нет пересечения MA)
+2026-11-26 15:56:38,289 - INFO - LSRG: позиция уже открыта/в неопределённости, пропуск
+2026-11-26 15:56:38,289 - INFO - MVID: позиция уже открыта/в неопределённости, пропуск
+2026-11-26 15:56:38,368 - INFO - 528000a62d35b78ce357fdc52e5ff075 GetCandles
+2026-11-26 15:56:38,460 - INFO - 823f43c2d20ba5ce036a44151edfb5c8 GetCandles
+2026-11-26 15:56:38,532 - INFO - [DEBUG MA] fast_prev=280.4000 fast_last=280.8500 slow_prev=280.6000 slow_last=280.6333 len=406
+2026-11-26 15:56:38,558 - INFO - 6d699cdd2af75bfc13366d68c91c0fed GetSandboxPortfolio
+2026-11-26 15:56:38,591 - INFO - 841778cc56794aa66827c20c191d5e8e GetSandboxPortfolio
+2026-11-26 15:56:38,651 - INFO - 0274c5efa596de3cd7b64a064a3e5ba1 GetLastPrices
+2026-11-26 15:56:38,716 - INFO - 6df85eaf61beccb226311bd3a2a2a9c6 GetLastPrices
+2026-11-26 15:56:38,778 - INFO - 324e5a964d727af846a676476ca243f3 GetLastPrices
+2026-11-26 15:56:38,839 - INFO - 1fbba7d249b2b19681a5d0f04bab3d9f GetLastPrices
+2026-11-26 15:56:38,840 - INFO - SMLT: размер позиции 0, пропуск
+2026-11-26 15:56:38,840 - INFO - VKCO: позиция уже открыта/в неопределённости, пропуск
+2026-11-26 15:56:38,935 - INFO - c47931d33477fa27f931456c9395960c GetCandles
+2026-11-26 15:56:39,034 - INFO - 8e2d987ad2bdc89e3316bc672bc0dc79 GetCandles
+2026-11-26 15:56:39,126 - INFO - [DEBUG MA] fast_prev=21.3400 fast_last=21.3400 slow_prev=21.3200 slow_last=21.3400 len=404
+2026-11-26 15:56:39,126 - INFO - ETLN: HOLD (Нет пересечения MA)
+2026-11-26 15:56:39,208 - INFO - 8daf31be66bf58da3ee3956d6da21a3b GetCandles
+2026-11-26 15:56:39,311 - INFO - 0b7fa1df1507e54962ff469a62bdca92 GetCandles
+2026-11-26 15:56:39,413 - INFO - [DEBUG MA] fast_prev=19.8800 fast_last=19.9700 slow_prev=19.9000 slow_last=19.9333 len=405
+2026-11-26 15:56:39,435 - INFO - d6b59159ca748dc270fe5e73c5f57921 GetSandboxPortfolio
+2026-11-26 15:56:39,465 - INFO - 7ff4e5ac6360f0f9e3cf99cf4e22f48f GetSandboxPortfolio
+2026-11-26 15:56:39,532 - INFO - 87d69b454b5ffb5620bb0720d936b7cc GetLastPrices
+2026-11-26 15:56:39,600 - INFO - 86bc41f842ee8f6093204269cd86565c GetLastPrices
+2026-11-26 15:56:39,660 - INFO - 75edfa73a253c34767cd8abdf735283e GetLastPrices
+2026-11-26 15:56:39,721 - INFO - 4db9fbeb97e703252ec41230de1da85c GetLastPrices
+2026-11-26 15:56:39,722 - INFO - UWGN: размер позиции 0, пропуск
+2026-11-26 15:56:39,723 - INFO - WUSH: позиция уже открыта/в неопределённости, пропуск
+2026-11-26 15:56:39,800 - INFO - 7e0fdd131b5655de3fa4d290dd58b13b GetCandles
+2026-11-26 15:56:39,925 - INFO - a465b351639e7641e50b3548f477b79b GetCandles
+2026-11-26 15:56:40,000 - INFO - [DEBUG MA] fast_prev=59.8000 fast_last=59.8500 slow_prev=59.7167 slow_last=59.8333 len=394
+2026-11-26 15:56:40,000 - INFO - IVAT: HOLD (Нет пересечения MA)
+2026-11-26 15:56:40,092 - INFO - f4358cb066faa03bb7c1708448b6033e GetCandles
+2026-11-26 15:56:40,187 - INFO - 3ed6cd5697ab9de474b68780123423d9 GetCandles
+2026-11-26 15:56:40,256 - INFO - [DEBUG MA] fast_prev=33.0400 fast_last=33.0200 slow_prev=33.0033 slow_last=33.0300 len=404
+2026-11-26 15:56:40,257 - INFO - SELG: HOLD (MA↓, но фильтр MA100 не пройден)
+2026-11-26 15:57:10,331 - INFO - eefc0f3e941bad68a78462eef9c688a4 GetLastPrices
+2026-11-26 15:57:10,358 - INFO - 479dc718e4e2e0f91f76d77d9d424802 GetSandboxPortfolio
+2026-11-26 15:57:10,365 - INFO - [reconcile] Все позиции совпадают (4 активных).
+2026-11-26 15:57:10,391 - INFO - b07d573ce3ef7f0e2b3b3283ceb91b1e GetSandboxPortfolio
+2026-11-26 15:57:10,481 - INFO - 66736e060c61ac7312126c09b87e57db GetCandles
+2026-11-26 15:57:10,594 - INFO - e064e1962cb842fd6ec23ed1caf0a7c9 GetCandles
+2026-11-26 15:57:10,670 - INFO - [DEBUG MA] fast_prev=6.1500 fast_last=6.1500 slow_prev=6.1333 slow_last=6.1500 len=406
+2026-11-26 15:57:10,671 - INFO - EUTR: HOLD (Нет пересечения MA)
+2026-11-26 15:57:10,671 - INFO - LSRG: позиция уже открыта/в неопределённости, пропуск
+2026-11-26 15:57:10,671 - INFO - MVID: позиция уже открыта/в неопределённости, пропуск
+2026-11-26 15:57:10,750 - INFO - ffc22d552e45082939955012707a5b14 GetCandles
+2026-11-26 15:57:10,849 - INFO - 5a338ab427075fdeb1d8d9b35694148e GetCandles
+2026-11-26 15:57:10,922 - INFO - [DEBUG MA] fast_prev=280.4000 fast_last=280.8500 slow_prev=280.6000 slow_last=280.6333 len=406
+2026-11-26 15:57:10,950 - INFO - 36066aede8cee92926bff2e4a28aaf50 GetSandboxPortfolio
+2026-11-26 15:57:10,989 - INFO - a5a6294a466e620ab70dc32a2e7c254c GetSandboxPortfolio
+2026-11-26 15:57:11,066 - INFO - 8ccb2dd3a5b2d060d8f82cec4ae1c99b GetLastPrices
+2026-11-26 15:57:11,130 - INFO - 5ba9d2107ee112c04fce7739918e1f26 GetLastPrices
+2026-11-26 15:57:11,192 - INFO - a922a820a15a3da0a28b2d0bbf93b11c GetLastPrices
+2026-11-26 15:57:11,255 - INFO - c4c9dbb9a18577807396e75828602658 GetLastPrices
+2026-11-26 15:57:11,255 - INFO - SMLT: размер позиции 0, пропуск
+2026-11-26 15:57:11,256 - INFO - VKCO: позиция уже открыта/в неопределённости, пропуск
+2026-11-26 15:57:11,344 - INFO - b24544de176285aa89d699cb1aff7b7b GetCandles
+2026-11-26 15:57:11,441 - INFO - 92f79c966c56692889aef49f7976a464 GetCandles
+2026-11-26 15:57:11,516 - INFO - [DEBUG MA] fast_prev=21.3400 fast_last=21.3400 slow_prev=21.3200 slow_last=21.3400 len=404
+2026-11-26 15:57:11,517 - INFO - ETLN: HOLD (Нет пересечения MA)
+2026-11-26 15:57:11,600 - INFO - 3ab45053d73ef664c497c7b5a6f326cd GetCandles
+2026-11-26 15:57:11,704 - INFO - d06d1c646b517999db4bac410dd498b4 GetCandles
+2026-11-26 15:57:11,777 - INFO - [DEBUG MA] fast_prev=19.8800 fast_last=19.9700 slow_prev=19.9000 slow_last=19.9333 len=405
+2026-11-26 15:57:11,803 - INFO - f53225fbf3a2c5b106c4b582507142a6 GetSandboxPortfolio
+2026-11-26 15:57:11,837 - INFO - 79cb39f9168349bc2b13e7d8192efea4 GetSandboxPortfolio
+2026-11-26 15:57:11,919 - INFO - e8ba51657faed642dabff4163ed5d920 GetLastPrices
+2026-11-26 15:57:11,976 - INFO - 7d72970cdd13385d8d73b2eabacaf6af GetLastPrices
+2026-11-26 15:57:12,071 - INFO - 5b13101797ce7493f3462b9fef5b5d20 GetLastPrices
+2026-11-26 15:57:12,128 - INFO - 496c783ae42d61a83f95d632ed6fa8ed GetLastPrices
+2026-11-26 15:57:12,129 - INFO - UWGN: размер позиции 0, пропуск
+2026-11-26 15:57:12,129 - INFO - WUSH: позиция уже открыта/в неопределённости, пропуск
+2026-11-26 15:57:12,208 - INFO - 4007c4b8838ae2f5ee7d1f255f85291b GetCandles
+2026-11-26 15:57:12,300 - INFO - 75a54ed191d983961f289289722b2044 GetCandles
+2026-11-26 15:57:12,370 - INFO - [DEBUG MA] fast_prev=59.8000 fast_last=59.8500 slow_prev=59.7167 slow_last=59.8333 len=394
+2026-11-26 15:57:12,370 - INFO - IVAT: HOLD (Нет пересечения MA)
+2026-11-26 15:57:12,481 - INFO - 8499ab473cf989ceb8014c7865c8d29b GetCandles
+2026-11-26 15:57:12,576 - INFO - 5d7ecfb906d7f0859f3582b68b804b31 GetCandles
+2026-11-26 15:57:12,650 - INFO - [DEBUG MA] fast_prev=33.0400 fast_last=33.0200 slow_prev=33.0033 slow_last=33.0300 len=404
+2026-11-26 15:57:12,651 - INFO - SELG: HOLD (MA↓, но фильтр MA100 не пройден)
+2026-11-26 15:57:42,710 - INFO - d6ff45cf345b28626e94de3e92610b59 GetLastPrices
+2026-11-26 15:57:42,742 - INFO - a8464087cffdd96247fdfa801c21a7ca GetSandboxPortfolio
+2026-11-26 15:57:42,747 - INFO - [reconcile] Все позиции совпадают (4 активных).
+2026-11-26 15:57:42,773 - INFO - a633d545d12ce4de48cd38bf4a3feac9 GetSandboxPortfolio
+2026-11-26 15:57:42,866 - INFO - 4f297fac64f237d1c4f2c0a5744a59a4 GetCandles
+2026-11-26 15:57:42,960 - INFO - d4faac3b278bd3f25458eb02d68f203d GetCandles
+2026-11-26 15:57:43,035 - INFO - [DEBUG MA] fast_prev=6.1500 fast_last=6.1500 slow_prev=6.1333 slow_last=6.1500 len=406
+2026-11-26 15:57:43,035 - INFO - EUTR: HOLD (Нет пересечения MA)
+2026-11-26 15:57:43,036 - INFO - LSRG: позиция уже открыта/в неопределённости, пропуск
+2026-11-26 15:57:43,036 - INFO - MVID: позиция уже открыта/в неопределённости, пропуск
+2026-11-26 15:57:43,120 - INFO - fb5b2ef81f5486151e4463431befe2fa GetCandles
+2026-11-26 15:57:43,213 - INFO - fb99689f64c3333bfc15165644ff1019 GetCandles
+2026-11-26 15:57:43,284 - INFO - [DEBUG MA] fast_prev=280.4000 fast_last=280.8500 slow_prev=280.6000 slow_last=280.6333 len=406
+2026-11-26 15:57:43,312 - INFO - d810153496fc057876f702f393ff4abc GetSandboxPortfolio
+2026-11-26 15:57:43,343 - INFO - 21028f65f69d4ce7c61895507ca389d9 GetSandboxPortfolio
+2026-11-26 15:57:43,416 - INFO - ff8fd916363973ce7a98d2247d72a511 GetLastPrices
+2026-11-26 15:57:43,476 - INFO - 7a7e369022656577d0ee886824247da3 GetLastPrices
+2026-11-26 15:57:43,539 - INFO - 1ada0935739a075d02b21b2054143bad GetLastPrices
+2026-11-26 15:57:43,602 - INFO - 26483b799794b327cc9f5b05ebaa00e1 GetLastPrices
+2026-11-26 15:57:43,602 - INFO - SMLT: размер позиции 0, пропуск
+2026-11-26 15:57:43,603 - INFO - VKCO: позиция уже открыта/в неопределённости, пропуск
+2026-11-26 15:57:43,682 - INFO - 3cef5e7ad38e82ce6d1b5618f0c162b7 GetCandles
+2026-11-26 15:57:43,798 - INFO - 52060e9a5cc768851d9ae96e6eb176b9 GetCandles
+2026-11-26 15:57:43,881 - INFO - [DEBUG MA] fast_prev=21.3400 fast_last=21.3400 slow_prev=21.3200 slow_last=21.3400 len=404
+2026-11-26 15:57:43,881 - INFO - ETLN: HOLD (Нет пересечения MA)
+2026-11-26 15:57:43,965 - INFO - 3d31b18ff29d516f1ffd90bd7f292a43 GetCandles
+2026-11-26 15:57:44,063 - INFO - 68501f0f14a56f03525d6a032d27e158 GetCandles
+2026-11-26 15:57:44,144 - INFO - [DEBUG MA] fast_prev=19.8800 fast_last=19.9700 slow_prev=19.9000 slow_last=19.9333 len=405
+2026-11-26 15:57:44,169 - INFO - 7b1f4697e19012a438c24edf56b87420 GetSandboxPortfolio
+2026-11-26 15:57:44,202 - INFO - 67ae840f014a4948330bb17337ff613e GetSandboxPortfolio
+2026-11-26 15:57:44,263 - INFO - bf16c27f9ceae63202452b30e593024e GetLastPrices
+2026-11-26 15:57:44,325 - INFO - c7613c9953436c0488d775c99a387e6b GetLastPrices
+2026-11-26 15:57:44,413 - INFO - 277072df6a70e8fd4a92f3000c3a9ba5 GetLastPrices
+2026-11-26 15:57:44,470 - INFO - 7c9963bf83f91a6a4d7f7947e3a32e9d GetLastPrices
+2026-11-26 15:57:44,471 - INFO - UWGN: размер позиции 0, пропуск
+2026-11-26 15:57:44,471 - INFO - WUSH: позиция уже открыта/в неопределённости, пропуск
+2026-11-26 15:57:44,551 - INFO - de40c8ca0c3844a1dd1b038aa0b82831 GetCandles
+2026-11-26 15:57:44,647 - INFO - c7c3cc45c107dd1ed9978e4a39179502 GetCandles
+2026-11-26 15:57:44,723 - INFO - [DEBUG MA] fast_prev=59.8000 fast_last=59.8500 slow_prev=59.7167 slow_last=59.8333 len=394
+2026-11-26 15:57:44,724 - INFO - IVAT: HOLD (Нет пересечения MA)
+2026-11-26 15:57:44,802 - INFO - 1839acb5be3a3624f03780b744b5f298 GetCandles
+2026-11-26 15:57:44,898 - INFO - 45506b2beaf76f934fc9ef743c744f1b GetCandles
+2026-11-26 15:57:44,973 - INFO - [DEBUG MA] fast_prev=33.0400 fast_last=33.0200 slow_prev=33.0033 slow_last=33.0300 len=404
+2026-11-26 15:57:44,973 - INFO - SELG: HOLD (MA↓, но фильтр MA100 не пройден)
+2026-11-26 15:58:15,029 - INFO - 63a916c4ff7bfe07f8a1d6e501b847ba GetLastPrices
+2026-11-26 15:58:15,061 - INFO - c7308a764d800bb03b504baf7cd84ea3 GetSandboxPortfolio
+2026-11-26 15:58:15,067 - INFO - [reconcile] Все позиции совпадают (4 активных).
+2026-11-26 15:58:15,093 - INFO - a633d0f5fe1243a80abc54f43cf9140d GetSandboxPortfolio
+2026-11-26 15:58:15,190 - INFO - a57b115bbb3820cfd503a5e3f0932b5f GetCandles
+2026-11-26 15:58:15,293 - INFO - 9c39ae3f93f8be6d6ef4b10edc5a1d55 GetCandles
+2026-11-26 15:58:15,382 - INFO - [DEBUG MA] fast_prev=6.1500 fast_last=6.1500 slow_prev=6.1333 slow_last=6.1500 len=406
+2026-11-26 15:58:15,382 - INFO - EUTR: HOLD (Нет пересечения MA)
+2026-11-26 15:58:15,383 - INFO - LSRG: позиция уже открыта/в неопределённости, пропуск
+2026-11-26 15:58:15,383 - INFO - MVID: позиция уже открыта/в неопределённости, пропуск
+2026-11-26 15:58:15,481 - INFO - 96219221b5656583877f4d8bff8d111a GetCandles
+2026-11-26 15:58:15,602 - INFO - c51793a3370f501b567fc15ac84f8b0d GetCandles
+2026-11-26 15:58:15,683 - INFO - [DEBUG MA] fast_prev=280.4000 fast_last=280.8500 slow_prev=280.6000 slow_last=280.6333 len=406
+2026-11-26 15:58:15,707 - INFO - 53e7bb5c65e7080fa028ebd9575de924 GetSandboxPortfolio
+2026-11-26 15:58:15,744 - INFO - 6f78c8b0205b0f0c82cf9c60bc4cf8b1 GetSandboxPortfolio
+2026-11-26 15:58:15,809 - INFO - e1528510b5877e4cea02fe1fc5f15178 GetLastPrices
+2026-11-26 15:58:15,873 - INFO - b57e5a5df4c091b564ad048c5ff56641 GetLastPrices
+2026-11-26 15:58:15,938 - INFO - d8657e96ea7f8c0f6c88f219ea06ac68 GetLastPrices
+2026-11-26 15:58:16,001 - INFO - 2bc653495dde9bfc7b6b2df08705f467 GetLastPrices
+2026-11-26 15:58:16,002 - INFO - SMLT: размер позиции 0, пропуск
+2026-11-26 15:58:16,003 - INFO - VKCO: позиция уже открыта/в неопределённости, пропуск
+2026-11-26 15:58:16,079 - INFO - 446c17183db0759f4aad809ba725b2d8 GetCandles
+2026-11-26 15:58:16,186 - INFO - 71cf72515c25d1c2c0dd04cf31469b14 GetCandles
+2026-11-26 15:58:16,309 - INFO - [DEBUG MA] fast_prev=21.3400 fast_last=21.3400 slow_prev=21.3200 slow_last=21.3400 len=404
+2026-11-26 15:58:16,309 - INFO - ETLN: HOLD (Нет пересечения MA)
+2026-11-26 15:58:16,389 - INFO - 474ecb6b20d392d621d031ab0503d5b3 GetCandles
+2026-11-26 15:58:16,497 - INFO - 1338f011059eff3e4571a45dbfd7b1da GetCandles
+2026-11-26 15:58:16,578 - INFO - [DEBUG MA] fast_prev=19.8800 fast_last=19.9700 slow_prev=19.9000 slow_last=19.9333 len=405
+2026-11-26 15:58:16,603 - INFO - 839f424dddd29c31760c66ca740cc470 GetSandboxPortfolio
+2026-11-26 15:58:16,641 - INFO - afb61bcbd0ddefbeebcd6fda321f3ae9 GetSandboxPortfolio
+2026-11-26 15:58:16,702 - INFO - 6b80af65f0426465ff781a0ff5e93ccf GetLastPrices
+2026-11-26 15:58:16,768 - INFO - 3b42806a0f5f0d397f1d756ea370c029 GetLastPrices
+2026-11-26 15:58:16,827 - INFO - 21dcfaed7199bbbafe0596cf643800c0 GetLastPrices
+2026-11-26 15:58:16,892 - INFO - 9398532ff04c47d8880cd86f8e0c4a29 GetLastPrices
+2026-11-26 15:58:16,892 - INFO - UWGN: размер позиции 0, пропуск
+2026-11-26 15:58:16,893 - INFO - WUSH: позиция уже открыта/в неопределённости, пропуск
+2026-11-26 15:58:16,968 - INFO - da61dad4d158f357323832eebb199a3d GetCandles
+2026-11-26 15:58:17,084 - INFO - de8eb972b425dc81d09bde563f9d5f8f GetCandles
+2026-11-26 15:58:17,165 - INFO - [DEBUG MA] fast_prev=59.8000 fast_last=59.8500 slow_prev=59.7167 slow_last=59.8333 len=394
+2026-11-26 15:58:17,165 - INFO - IVAT: HOLD (Нет пересечения MA)
+2026-11-26 15:58:17,247 - INFO - b88a08ad4ff7ef02f1fd98234f1ee23e GetCandles
+2026-11-26 15:58:17,346 - INFO - 23c25ff9c6ebdc3a763e79184e90265e GetCandles
+2026-11-26 15:58:17,431 - INFO - [DEBUG MA] fast_prev=33.0400 fast_last=33.0200 slow_prev=33.0033 slow_last=33.0300 len=404
+2026-11-26 15:58:17,432 - INFO - SELG: HOLD (MA↓, но фильтр MA100 не пройден)
+2026-11-26 15:58:47,493 - INFO - 3bc03b733bc50c4675840968371ce7dd GetLastPrices
+2026-11-26 15:58:47,522 - INFO - 14ab4597ca9a11eb89ff389e1541923b GetSandboxPortfolio
+2026-11-26 15:58:47,528 - INFO - [reconcile] Все позиции совпадают (4 активных).
+2026-11-26 15:58:47,561 - INFO - 55925c88be4838d7a4af6b3feb2ceaf0 GetSandboxPortfolio
+2026-11-26 15:58:47,661 - INFO - 5086a0127951a73271937bc9d1c5be02 GetCandles
+2026-11-26 15:58:47,781 - INFO - 09a199f04439fe12e476118be4402a3c GetCandles
+2026-11-26 15:58:47,871 - INFO - [DEBUG MA] fast_prev=6.1500 fast_last=6.1500 slow_prev=6.1333 slow_last=6.1500 len=406
+2026-11-26 15:58:47,871 - INFO - EUTR: HOLD (Нет пересечения MA)
+2026-11-26 15:58:47,872 - INFO - LSRG: позиция уже открыта/в неопределённости, пропуск
+2026-11-26 15:58:47,872 - INFO - MVID: позиция уже открыта/в неопределённости, пропуск
+2026-11-26 15:58:47,946 - INFO - 5c01c1ed111202a008ede77bff8ad3d9 GetCandles
+2026-11-26 15:58:48,055 - INFO - f9617b863ae09d8d7384022217bf8554 GetCandles
+2026-11-26 15:58:48,155 - INFO - [DEBUG MA] fast_prev=280.4000 fast_last=280.8500 slow_prev=280.6000 slow_last=280.6333 len=406
+2026-11-26 15:58:48,193 - INFO - 62bfc3e7473e153b074bb54ef2f25494 GetSandboxPortfolio
+2026-11-26 15:58:48,232 - INFO - b2f3c368483050b00e066dfebd992ec7 GetSandboxPortfolio
+2026-11-26 15:58:48,333 - INFO - fa0a56e59fcde5692959dfbaef12e9b3 GetLastPrices
+2026-11-26 15:58:48,398 - INFO - 7f4c3fa5ec932f1ae98bf0e5443d7595 GetLastPrices
+2026-11-26 15:58:48,460 - INFO - 65ea4266881e696a9d3e0490c908400a GetLastPrices
+2026-11-26 15:58:48,523 - INFO - abf1c7bb83a3fedc669255d3d12e4e7b GetLastPrices
+2026-11-26 15:58:48,523 - INFO - SMLT: размер позиции 0, пропуск
+2026-11-26 15:58:48,524 - INFO - VKCO: позиция уже открыта/в неопределённости, пропуск
+2026-11-26 15:58:48,612 - INFO - 8c87d43c19c65d5688994a5f8ad07e1b GetCandles
+2026-11-26 15:58:48,736 - INFO - dcfa6f33752f87e5eacb2122fc5b4f82 GetCandles
+2026-11-26 15:58:48,812 - INFO - [DEBUG MA] fast_prev=21.3400 fast_last=21.3400 slow_prev=21.3200 slow_last=21.3400 len=404
+2026-11-26 15:58:48,813 - INFO - ETLN: HOLD (Нет пересечения MA)
+2026-11-26 15:58:48,882 - INFO - 68a42960b61f36e100a20191bfc44887 GetCandles
+2026-11-26 15:58:48,982 - INFO - ab09dbb3242151ec4868be826872c81d GetCandles
+2026-11-26 15:58:49,079 - INFO - [DEBUG MA] fast_prev=19.8800 fast_last=19.9700 slow_prev=19.9000 slow_last=19.9333 len=405
+2026-11-26 15:58:49,105 - INFO - 377841210b74904fddb619cbd88bde16 GetSandboxPortfolio
+2026-11-26 15:58:49,138 - INFO - a6dcc037fd495f4353c3a7b4444fd0ae GetSandboxPortfolio
+2026-11-26 15:58:49,208 - INFO - 0d5513133a88f927e3f4fc58ca8f0894 GetLastPrices
+2026-11-26 15:58:49,277 - INFO - 879b7848ed570a1c3de1bcbf15634089 GetLastPrices
+2026-11-26 15:58:49,340 - INFO - 7548910943414b2a4d6c6dd4178c8d67 GetLastPrices
+2026-11-26 15:58:49,401 - INFO - 75fe9121648d0a3508aed7a7f18bc6ba GetLastPrices
+2026-11-26 15:58:49,402 - INFO - UWGN: размер позиции 0, пропуск
+2026-11-26 15:58:49,403 - INFO - WUSH: позиция уже открыта/в неопределённости, пропуск
+2026-11-26 15:58:49,479 - INFO - b1fa2beb9997805774447a2895f3c744 GetCandles
+2026-11-26 15:58:49,586 - INFO - 1cbf1b140d91228924d8d554b74a0013 GetCandles
+2026-11-26 15:58:49,712 - INFO - [DEBUG MA] fast_prev=59.8000 fast_last=59.8500 slow_prev=59.7167 slow_last=59.8333 len=394
+2026-11-26 15:58:49,712 - INFO - IVAT: HOLD (Нет пересечения MA)
+2026-11-26 15:58:49,799 - INFO - 3e2040fe4e56560d484054809ec50b5a GetCandles
+2026-11-26 15:58:49,902 - INFO - 442af3804442203c9614e4848e0b1dac GetCandles
+2026-11-26 15:58:49,976 - INFO - [DEBUG MA] fast_prev=33.0400 fast_last=33.0200 slow_prev=33.0033 slow_last=33.0300 len=404
+2026-11-26 15:58:49,977 - INFO - SELG: HOLD (MA↓, но фильтр MA100 не пройден)
+2026-11-26 15:59:20,050 - INFO - 2eac90b9d5f4c645c5c07d33d5bdfe50 GetLastPrices
+2026-11-26 15:59:20,094 - INFO - d0e0f09d4bbf9c9b7820de2799ff21ad GetSandboxPortfolio
+2026-11-26 15:59:20,099 - INFO - [reconcile] Все позиции совпадают (4 активных).
+2026-11-26 15:59:20,124 - INFO - 4f20a11dcbbb144eefefe31205e8d390 GetSandboxPortfolio
+2026-11-26 15:59:20,219 - INFO - 1b5bf886d2b454f143fffb6a1d1bfa8a GetCandles
+2026-11-26 15:59:20,315 - INFO - f1b16045ab7b2d723ecd13eb9552efbc GetCandles
+2026-11-26 15:59:20,400 - INFO - [DEBUG MA] fast_prev=6.1500 fast_last=6.1500 slow_prev=6.1333 slow_last=6.1500 len=406
+2026-11-26 15:59:20,401 - INFO - EUTR: HOLD (Нет пересечения MA)
+2026-11-26 15:59:20,401 - INFO - LSRG: позиция уже открыта/в неопределённости, пропуск
+2026-11-26 15:59:20,402 - INFO - MVID: позиция уже открыта/в неопределённости, пропуск
+2026-11-26 15:59:20,473 - INFO - bb0e344052e13d962c10054700f277f4 GetCandles
+2026-11-26 15:59:20,598 - INFO - 5d4ee56c687312cb311e640bad92d363 GetCandles
+2026-11-26 15:59:20,680 - INFO - [DEBUG MA] fast_prev=280.4000 fast_last=280.8500 slow_prev=280.6000 slow_last=280.6333 len=406
+2026-11-26 15:59:20,726 - INFO - 15b4e082c7729770de019e0d7f7152bd GetSandboxPortfolio
+2026-11-26 15:59:20,760 - INFO - 95b1080a7110c4ca8d33dd0617b74279 GetSandboxPortfolio
+2026-11-26 15:59:20,817 - INFO - 5e49ed8d73a9e90698d6ce8b3d3d755a GetLastPrices
+2026-11-26 15:59:20,885 - INFO - 5621c801b5128c2f89adb31e0c719ee5 GetLastPrices
+2026-11-26 15:59:20,967 - INFO - 17c80177e78d530648c3aa64a5b3c912 GetLastPrices
+2026-11-26 15:59:21,025 - INFO - 47e848bd698434ae084c9a3da60c2288 GetLastPrices
+2026-11-26 15:59:21,026 - INFO - SMLT: размер позиции 0, пропуск
+2026-11-26 15:59:21,026 - INFO - VKCO: позиция уже открыта/в неопределённости, пропуск
+2026-11-26 15:59:21,109 - INFO - a32ae5b0de0bb9a940a219199b538edb GetCandles
+2026-11-26 15:59:21,207 - INFO - ead0272cf238c9238727ed8534eb2de8 GetCandles
+2026-11-26 15:59:21,299 - INFO - [DEBUG MA] fast_prev=21.3400 fast_last=21.3400 slow_prev=21.3200 slow_last=21.3400 len=404
+2026-11-26 15:59:21,301 - INFO - ETLN: HOLD (Нет пересечения MA)
+2026-11-26 15:59:21,385 - INFO - 1ece0dc1f3a9f075ebcb1f5cae6e1ab8 GetCandles
+2026-11-26 15:59:21,490 - INFO - 6feff7fba541034c81630504c8ed61dc GetCandles
+2026-11-26 15:59:21,568 - INFO - [DEBUG MA] fast_prev=19.8800 fast_last=19.9700 slow_prev=19.9000 slow_last=19.9333 len=405
+2026-11-26 15:59:21,597 - INFO - 08831499569592a88b6b8413f01407ec GetSandboxPortfolio
+2026-11-26 15:59:21,629 - INFO - 8a5e14f8edb1f90269ee779a2b112695 GetSandboxPortfolio
+2026-11-26 15:59:21,723 - INFO - ef89f79aeb389e8e780e3dd448fcc7b4 GetLastPrices
+2026-11-26 15:59:21,793 - INFO - 6fba0ac007f1a8f2252459829b977572 GetLastPrices
+2026-11-26 15:59:21,852 - INFO - fcafc3d9cf28593537cb69e90fc69684 GetLastPrices
+2026-11-26 15:59:21,917 - INFO - d0eb89d4dc54ac26e635c3dfe2fdc8e6 GetLastPrices
+2026-11-26 15:59:21,918 - INFO - UWGN: размер позиции 0, пропуск
+2026-11-26 15:59:21,918 - INFO - WUSH: позиция уже открыта/в неопределённости, пропуск
+2026-11-26 15:59:21,998 - INFO - 68955eef9217cd9c6677bec0b8638716 GetCandles
+2026-11-26 15:59:22,105 - INFO - 4f17eed5f4903cd860d63bf3dcb19cef GetCandles
+2026-11-26 15:59:22,204 - INFO - [DEBUG MA] fast_prev=59.8000 fast_last=59.8500 slow_prev=59.7167 slow_last=59.8333 len=394
+2026-11-26 15:59:22,205 - INFO - IVAT: HOLD (Нет пересечения MA)
+2026-11-26 15:59:22,281 - INFO - e276cfd466a731a1b67726930dbc00bd GetCandles
+2026-11-26 15:59:22,432 - INFO - 8a84168173a8472a797bd9001793caea GetCandles
+2026-11-26 15:59:22,508 - INFO - [DEBUG MA] fast_prev=33.0400 fast_last=33.0200 slow_prev=33.0033 slow_last=33.0300 len=404
+2026-11-26 15:59:22,509 - INFO - SELG: HOLD (MA↓, но фильтр MA100 не пройден)
+2026-11-26 15:59:52,603 - INFO - b7fa101823a2db44399077bf4290688c GetLastPrices
+2026-11-26 15:59:52,630 - INFO - 6a110c89faa57cd5dd7c41b98d87ff0e GetSandboxPortfolio
+2026-11-26 15:59:52,635 - INFO - [reconcile] Все позиции совпадают (4 активных).
+2026-11-26 15:59:52,666 - INFO - a08a687639ba91acc76d7acde265d551 GetSandboxPortfolio
+2026-11-26 15:59:52,762 - INFO - 3dbeb0132fb9518261755958b91dcd72 GetCandles
+2026-11-26 15:59:52,857 - INFO - 81e9bbb56be70090f5d092a3f3fc34d9 GetCandles
+2026-11-26 15:59:52,930 - INFO - [DEBUG MA] fast_prev=6.1500 fast_last=6.1500 slow_prev=6.1333 slow_last=6.1500 len=406
+2026-11-26 15:59:52,930 - INFO - EUTR: HOLD (Нет пересечения MA)
+2026-11-26 15:59:52,931 - INFO - LSRG: позиция уже открыта/в неопределённости, пропуск
+2026-11-26 15:59:52,931 - INFO - MVID: позиция уже открыта/в неопределённости, пропуск
+2026-11-26 15:59:53,003 - INFO - 1dfbfa02ca902a2ad8cffcab1c841cf0 GetCandles
+2026-11-26 15:59:53,105 - INFO - 8f7c5612b4aff3009d8635ab0c5e84a4 GetCandles
+2026-11-26 15:59:53,181 - INFO - [DEBUG MA] fast_prev=280.4000 fast_last=280.8500 slow_prev=280.6000 slow_last=280.6333 len=406
+2026-11-26 15:59:53,207 - INFO - f1b53e528264d2e067ec26a62a284547 GetSandboxPortfolio
+2026-11-26 15:59:53,241 - INFO - 7886ee31c1ca504210f481ecd2143ff5 GetSandboxPortfolio
+2026-11-26 15:59:53,325 - INFO - f84d334495811db537d509ef484a3971 GetLastPrices
+2026-11-26 15:59:53,388 - INFO - f5bc8fd005635a374c5de5648f248488 GetLastPrices
+2026-11-26 15:59:53,456 - INFO - ba6fd35afba25075e72fa44535a0fd81 GetLastPrices
+2026-11-26 15:59:53,516 - INFO - d6327aad3b3e974f9ca9510156979e13 GetLastPrices
+2026-11-26 15:59:53,517 - INFO - SMLT: размер позиции 0, пропуск
+2026-11-26 15:59:53,517 - INFO - VKCO: позиция уже открыта/в неопределённости, пропуск
+2026-11-26 15:59:53,595 - INFO - 946bf05209333e8e06754223694bd02e GetCandles
+2026-11-26 15:59:53,703 - INFO - 7c544fcb08ea07901db18a36b8b3d175 GetCandles
+2026-11-26 15:59:53,778 - INFO - [DEBUG MA] fast_prev=21.3400 fast_last=21.3400 slow_prev=21.3200 slow_last=21.3400 len=404
+2026-11-26 15:59:53,779 - INFO - ETLN: HOLD (Нет пересечения MA)
+2026-11-26 15:59:53,883 - INFO - 4a1024d8d6f1a974f109aff4af5885c5 GetCandles
+2026-11-26 15:59:53,982 - INFO - 25c3aa7bb1bb2a245e39bcff9e440357 GetCandles
+2026-11-26 15:59:54,055 - INFO - [DEBUG MA] fast_prev=19.8800 fast_last=19.9700 slow_prev=19.9000 slow_last=19.9333 len=405
+2026-11-26 15:59:54,079 - INFO - 96c85bb18adfa0fe4d5cdb087e954292 GetSandboxPortfolio
+2026-11-26 15:59:54,115 - INFO - 589708b25836877532e25dca030ce80b GetSandboxPortfolio
+2026-11-26 15:59:54,176 - INFO - d0309cfef8361485973b18ab6202e2c9 GetLastPrices
+2026-11-26 15:59:54,245 - INFO - 2f8fad864b58edfa09e8bb02aa47d98a GetLastPrices
+2026-11-26 15:59:54,302 - INFO - 8a9f526d59ce74176f5e9e801df71ebd GetLastPrices
+2026-11-26 15:59:54,366 - INFO - 80bcb7600accac98f7bca01cfba6edae GetLastPrices
+2026-11-26 15:59:54,366 - INFO - UWGN: размер позиции 0, пропуск
+2026-11-26 15:59:54,367 - INFO - WUSH: позиция уже открыта/в неопределённости, пропуск
+2026-11-26 15:59:54,447 - INFO - 864796bec0a3d2185fc1bc22969ba3db GetCandles
+2026-11-26 15:59:54,542 - INFO - bccb38faa78eaaf9c278f64a5e514966 GetCandles
+2026-11-26 15:59:54,610 - INFO - [DEBUG MA] fast_prev=59.8000 fast_last=59.8500 slow_prev=59.7167 slow_last=59.8333 len=394
+2026-11-26 15:59:54,610 - INFO - IVAT: HOLD (Нет пересечения MA)
+2026-11-26 15:59:54,694 - INFO - 2f22a0f38764701c24e129ab3a84744b GetCandles
+2026-11-26 15:59:54,787 - INFO - 6ec96ffba891c1a931a2adb251d40515 GetCandles
+2026-11-26 15:59:54,856 - INFO - [DEBUG MA] fast_prev=33.0400 fast_last=33.0200 slow_prev=33.0033 slow_last=33.0300 len=404
+2026-11-26 15:59:54,857 - INFO - SELG: HOLD (MA↓, но фильтр MA100 не пройден)
+2026-11-26 16:00:24,985 - INFO - 6ed10a8c90727d1d311f2182de96ba50 GetLastPrices
+2026-11-26 16:00:25,026 - INFO - 0d3d6d42e05acbe275b9093e060e985a GetSandboxPortfolio
+2026-11-26 16:00:25,032 - INFO - [reconcile] Все позиции совпадают (4 активных).
+2026-11-26 16:00:25,060 - INFO - 821cdb6349df6e6e4d0751f2b406700f GetSandboxPortfolio
+2026-11-26 16:00:25,180 - INFO - e631f59e00d7652e2afd713820e0adbf GetCandles
+2026-11-26 16:00:25,283 - INFO - 07e01304ed768c2873694603f706c39b GetCandles
+2026-11-26 16:00:25,362 - INFO - [DEBUG MA] fast_prev=6.1500 fast_last=6.1000 slow_prev=6.1500 slow_last=6.1167 len=406
+2026-11-26 16:00:25,363 - INFO - EUTR: HOLD (Нет пересечения MA)
+2026-11-26 16:00:25,365 - INFO - LSRG: позиция уже открыта/в неопределённости, пропуск
+2026-11-26 16:00:25,365 - INFO - MVID: позиция уже открыта/в неопределённости, пропуск
+2026-11-26 16:00:25,462 - INFO - c7158f8fcc86c54d38d2acf72c934d47 GetCandles
+2026-11-26 16:00:25,576 - INFO - 5e0ecc07a206126b235ceb645d5fc73f GetCandles
+2026-11-26 16:00:25,650 - INFO - [DEBUG MA] fast_prev=280.8500 fast_last=281.3000 slow_prev=280.6333 slow_last=281.0667 len=406
+2026-11-26 16:00:25,651 - INFO - SMLT: HOLD (Нет пересечения MA)
+2026-11-26 16:00:25,652 - INFO - VKCO: позиция уже открыта/в неопределённости, пропуск
+2026-11-26 16:00:25,735 - INFO - d9d5b26f47014fb3801d056dd3ce02ab GetCandles
+2026-11-26 16:00:25,845 - INFO - 07ac9fb30984fa3de068e7b368afcbca GetCandles
+2026-11-26 16:00:25,934 - INFO - [DEBUG MA] fast_prev=21.3400 fast_last=21.3700 slow_prev=21.3400 slow_last=21.3600 len=404
+2026-11-26 16:00:25,935 - INFO - ETLN: HOLD (Нет пересечения MA)
+2026-11-26 16:00:26,034 - INFO - acf7c3909182d3520c453ae4f5af273d GetCandles
+2026-11-26 16:00:26,153 - INFO - 22eb2a269ce105d15382087c594c4a58 GetCandles
+2026-11-26 16:00:26,268 - INFO - [DEBUG MA] fast_prev=19.9700 fast_last=20.0400 slow_prev=19.9333 slow_last=19.9933 len=405
+2026-11-26 16:00:26,268 - INFO - UWGN: HOLD (Нет пересечения MA)
+2026-11-26 16:00:26,270 - INFO - WUSH: позиция уже открыта/в неопределённости, пропуск
+2026-11-26 16:00:26,350 - INFO - a6fa249c5afa75cf1113e00b509aa395 GetCandles
+2026-11-26 16:00:26,457 - INFO - 309df8187fe6c8a9fc867a2c704ffe66 GetCandles
+2026-11-26 16:00:26,581 - INFO - [DEBUG MA] fast_prev=59.8500 fast_last=59.9000 slow_prev=59.8333 slow_last=59.8667 len=394
+2026-11-26 16:00:26,582 - INFO - IVAT: HOLD (Нет пересечения MA)
+2026-11-26 16:00:26,685 - INFO - 3854d447e105be2aec902846fea0952e GetCandles
+2026-11-26 16:00:26,798 - INFO - 686c561c3755f64d93d26f02affad337 GetCandles
+2026-11-26 16:00:26,937 - INFO - [DEBUG MA] fast_prev=33.0200 fast_last=33.0200 slow_prev=33.0300 slow_last=33.0233 len=404
+2026-11-26 16:00:26,938 - INFO - SELG: HOLD (Нет пересечения MA)
+2026-11-26 16:00:57,031 - INFO - 33517b03b9f483ea0d601f7b0442f39b GetLastPrices
+2026-11-26 16:00:57,059 - INFO - 0f5441e3f325740e11eb69f347398b39 GetSandboxPortfolio
+2026-11-26 16:00:57,065 - INFO - [reconcile] Все позиции совпадают (4 активных).
+2026-11-26 16:00:57,094 - INFO - a4229ce62fe6b8426d87d09663e5f42e GetSandboxPortfolio
+2026-11-26 16:00:57,182 - INFO - 24d0363d08c2e0638ccced3415e208e4 GetCandles
+2026-11-26 16:00:57,281 - INFO - 57511d0a68e75a31a351b7793affd617 GetCandles
+2026-11-26 16:00:57,442 - INFO - [DEBUG MA] fast_prev=6.1500 fast_last=6.1000 slow_prev=6.1500 slow_last=6.1167 len=406
+2026-11-26 16:00:57,589 - INFO - EUTR: HOLD (Нет пересечения MA)
+2026-11-26 16:00:57,590 - INFO - LSRG: позиция уже открыта/в неопределённости, пропуск
+2026-11-26 16:00:57,611 - INFO - MVID: позиция уже открыта/в неопределённости, пропуск
+2026-11-26 16:00:57,721 - INFO - 1edb49762241586a0cd1adcf7f90a2da GetCandles
+2026-11-26 16:00:57,821 - INFO - a3986c8fd5ad3b8188a78b7018b34f4e GetCandles
+2026-11-26 16:00:57,897 - INFO - [DEBUG MA] fast_prev=280.8500 fast_last=281.3000 slow_prev=280.6333 slow_last=281.0667 len=406
+2026-11-26 16:00:57,898 - INFO - SMLT: HOLD (Нет пересечения MA)
+2026-11-26 16:00:57,898 - INFO - VKCO: позиция уже открыта/в неопределённости, пропуск
+2026-11-26 16:00:57,992 - INFO - bbac5a7ab3e643429bddfdc03ee8051f GetCandles
+2026-11-26 16:00:58,098 - INFO - 9eeee46d84fc64b4cfda76c3786e1843 GetCandles
+2026-11-26 16:00:58,179 - INFO - [DEBUG MA] fast_prev=21.3400 fast_last=21.3700 slow_prev=21.3400 slow_last=21.3600 len=404
+2026-11-26 16:00:58,180 - INFO - ETLN: HOLD (Нет пересечения MA)
+2026-11-26 16:00:58,258 - INFO - c0aceb22da0dcf53d518c7af7e0c9544 GetCandles
+2026-11-26 16:00:58,358 - INFO - f2b596e52617c1725490dcf4047a49eb GetCandles
+2026-11-26 16:00:58,434 - INFO - [DEBUG MA] fast_prev=19.9700 fast_last=20.0500 slow_prev=19.9333 slow_last=20.0000 len=405
+2026-11-26 16:00:58,434 - INFO - UWGN: HOLD (Нет пересечения MA)
+2026-11-26 16:00:58,434 - INFO - WUSH: позиция уже открыта/в неопределённости, пропуск
+2026-11-26 16:00:58,519 - INFO - b6fd0bafcf6c11a797d7e9f17d041f0a GetCandles
+2026-11-26 16:00:58,619 - INFO - 0f2aa3eb23534f1e6312854d4e867fe6 GetCandles
+2026-11-26 16:00:58,690 - INFO - [DEBUG MA] fast_prev=59.8500 fast_last=59.9000 slow_prev=59.8333 slow_last=59.8667 len=394
+2026-11-26 16:00:58,691 - INFO - IVAT: HOLD (Нет пересечения MA)
+2026-11-26 16:00:58,794 - INFO - 2208b7aba0ad2165a7eefa34de17d58d GetCandles
+2026-11-26 16:00:58,901 - INFO - 05ba1982acfe91afc4ffc1c0d782956a GetCandles
+2026-11-26 16:00:58,975 - INFO - [DEBUG MA] fast_prev=33.0200 fast_last=33.0200 slow_prev=33.0300 slow_last=33.0233 len=404
+2026-11-26 16:00:58,975 - INFO - SELG: HOLD (Нет пересечения MA)
+2026-11-26 16:01:29,042 - INFO - 890b03f2c8b1af05f09f662a4cfc0f72 GetLastPrices
+2026-11-26 16:01:29,070 - INFO - 5a2dc655b7b66b02a7c2358de35ac09f GetSandboxPortfolio
+2026-11-26 16:01:29,080 - INFO - [reconcile] Все позиции совпадают (4 активных).
+2026-11-26 16:01:29,106 - INFO - 5f20af76a4d6b7a581705b74c20927ac GetSandboxPortfolio
+2026-11-26 16:01:29,214 - INFO - a908d29b982d0455fc8a1e848123423a GetCandles
+2026-11-26 16:01:29,318 - INFO - 68d49a8b648b956ab6d38572c4ef8950 GetCandles
+2026-11-26 16:01:29,460 - INFO - [DEBUG MA] fast_prev=6.1500 fast_last=6.1000 slow_prev=6.1500 slow_last=6.1167 len=406
+2026-11-26 16:01:29,460 - INFO - EUTR: HOLD (Нет пересечения MA)
+2026-11-26 16:01:29,461 - INFO - LSRG: позиция уже открыта/в неопределённости, пропуск
+2026-11-26 16:01:29,461 - INFO - MVID: позиция уже открыта/в неопределённости, пропуск
+2026-11-26 16:01:29,540 - INFO - cc4202bd01565b59a4e3f3ee06624e24 GetCandles
+2026-11-26 16:01:29,652 - INFO - 4750300c5948f3b12cd526b07bfe094e GetCandles
+2026-11-26 16:01:29,726 - INFO - [DEBUG MA] fast_prev=280.8500 fast_last=281.3000 slow_prev=280.6333 slow_last=281.0667 len=406
+2026-11-26 16:01:29,726 - INFO - SMLT: HOLD (Нет пересечения MA)
+2026-11-26 16:01:29,727 - INFO - VKCO: позиция уже открыта/в неопределённости, пропуск
+2026-11-26 16:01:29,820 - INFO - b1788c8cc0001c15394df085dfd04f2e GetCandles
+2026-11-26 16:01:30,006 - INFO - 5c8e12326fc85124a9e5a142821edeaa GetCandles
+2026-11-26 16:01:30,076 - INFO - [DEBUG MA] fast_prev=21.3400 fast_last=21.3700 slow_prev=21.3400 slow_last=21.3600 len=404
+2026-11-26 16:01:30,077 - INFO - ETLN: HOLD (Нет пересечения MA)
+2026-11-26 16:01:30,203 - INFO - 81fd5e36a0b669cf6abac995eb852ff5 GetCandles
+2026-11-26 16:01:30,339 - INFO - 239c1475c0cb5d10836156146f7def1f GetCandles
+2026-11-26 16:01:30,411 - INFO - [DEBUG MA] fast_prev=19.9700 fast_last=20.0500 slow_prev=19.9333 slow_last=20.0000 len=405
+2026-11-26 16:01:30,412 - INFO - UWGN: HOLD (Нет пересечения MA)
+2026-11-26 16:01:30,412 - INFO - WUSH: позиция уже открыта/в неопределённости, пропуск
+2026-11-26 16:01:30,519 - INFO - f723f16b8da7ebcc0a75ebe880ee165e GetCandles
+2026-11-26 16:01:30,650 - INFO - 78a72e833074656c0624b3a3d460cb7d GetCandles
+2026-11-26 16:01:30,721 - INFO - [DEBUG MA] fast_prev=59.8500 fast_last=59.9000 slow_prev=59.8333 slow_last=59.8667 len=394
+2026-11-26 16:01:30,721 - INFO - IVAT: HOLD (Нет пересечения MA)
+2026-11-26 16:01:30,821 - INFO - f6edbac52327a7dae26cc647af6ddffa GetCandles
+2026-11-26 16:01:30,968 - INFO - 60885de7ff381c82b3fc3a3aa928b733 GetCandles
+2026-11-26 16:01:31,038 - INFO - [DEBUG MA] fast_prev=33.0200 fast_last=33.0200 slow_prev=33.0300 slow_last=33.0233 len=404
+2026-11-26 16:01:31,038 - INFO - SELG: HOLD (Нет пересечения MA)
+2026-11-26 16:02:01,115 - INFO - 37290d23c698dce945af0716d8676f37 GetLastPrices
+2026-11-26 16:02:01,162 - INFO - 2f796c50daee1955535a652d8b018288 GetSandboxPortfolio
+2026-11-26 16:02:01,168 - INFO - [reconcile] Все позиции совпадают (4 активных).
+2026-11-26 16:02:01,195 - INFO - f3abe72ca9a9679b039114849f699039 GetSandboxPortfolio
+2026-11-26 16:02:01,337 - INFO - 885ec13e64737c05dcde90be5d5cdb7b GetCandles
+2026-11-26 16:02:01,443 - INFO - 798288b65ac064c27296cfad23656518 GetCandles
+2026-11-26 16:02:01,540 - INFO - [DEBUG MA] fast_prev=6.1500 fast_last=6.1000 slow_prev=6.1500 slow_last=6.1167 len=406
+2026-11-26 16:02:01,541 - INFO - EUTR: HOLD (Нет пересечения MA)
+2026-11-26 16:02:01,541 - INFO - LSRG: позиция уже открыта/в неопределённости, пропуск
+2026-11-26 16:02:01,541 - INFO - MVID: позиция уже открыта/в неопределённости, пропуск
+2026-11-26 16:02:01,625 - INFO - 48cc4a7cc1a8a2d7c11f4665c6667b3f GetCandles
+2026-11-26 16:02:01,769 - INFO - 721cd5892e4c4ab46e0896a7067bbf37 GetCandles
+2026-11-26 16:02:01,883 - INFO - [DEBUG MA] fast_prev=280.8500 fast_last=281.3000 slow_prev=280.6333 slow_last=281.0667 len=406
+2026-11-26 16:02:01,883 - INFO - SMLT: HOLD (Нет пересечения MA)
+2026-11-26 16:02:01,883 - INFO - VKCO: позиция уже открыта/в неопределённости, пропуск
+2026-11-26 16:02:01,961 - INFO - d41e46fda5128df2383bd9e40cc5462f GetCandles
+2026-11-26 16:02:02,065 - INFO - f4601ecb689211124e529a63311657ab GetCandles
+2026-11-26 16:02:02,139 - INFO - [DEBUG MA] fast_prev=21.3400 fast_last=21.3700 slow_prev=21.3400 slow_last=21.3600 len=404
+2026-11-26 16:02:02,140 - INFO - ETLN: HOLD (Нет пересечения MA)
+2026-11-26 16:02:02,225 - INFO - 7f4ea9aea109ab280c80f894a3429a01 GetCandles
+2026-11-26 16:02:02,337 - INFO - 178f933d474777ba15a78e16bc7f6e04 GetCandles
+2026-11-26 16:02:02,414 - INFO - [DEBUG MA] fast_prev=19.9700 fast_last=20.0500 slow_prev=19.9333 slow_last=20.0000 len=405
+2026-11-26 16:02:02,415 - INFO - UWGN: HOLD (Нет пересечения MA)
+2026-11-26 16:02:02,415 - INFO - WUSH: позиция уже открыта/в неопределённости, пропуск
+2026-11-26 16:02:02,493 - INFO - 2cd80d4c6102b3d45a05f0583c4d8d95 GetCandles
+2026-11-26 16:02:02,593 - INFO - cc0a7bd3668ce44034854f1038d49cc2 GetCandles
+2026-11-26 16:02:02,668 - INFO - [DEBUG MA] fast_prev=59.8500 fast_last=59.9000 slow_prev=59.8333 slow_last=59.8667 len=394
+2026-11-26 16:02:02,669 - INFO - IVAT: HOLD (Нет пересечения MA)
+2026-11-26 16:02:02,755 - INFO - 2daa99893dfa6e8635bd1a44116bb43b GetCandles
+2026-11-26 16:02:02,856 - INFO - 6a84ca223ed833f3e5882e8fafc5f1fc GetCandles
+2026-11-26 16:02:02,935 - INFO - [DEBUG MA] fast_prev=33.0200 fast_last=33.0200 slow_prev=33.0300 slow_last=33.0233 len=404
+2026-11-26 16:02:02,936 - INFO - SELG: HOLD (Нет пересечения MA)
+2026-11-26 16:02:33,064 - INFO - d33573428642e60a1028899f52639bc1 GetLastPrices
+2026-11-26 16:02:33,116 - INFO - 771ae13313aa0414ec804888b7f59a50 GetSandboxPortfolio
+2026-11-26 16:02:33,122 - INFO - [reconcile] Все позиции совпадают (4 активных).
+2026-11-26 16:02:33,148 - INFO - 966c88496ec1e00cb56ac92fddbfa40f GetSandboxPortfolio
+2026-11-26 16:02:33,253 - INFO - ed1bf77c00bfcf28fb69ee2577f2d831 GetCandles
+2026-11-26 16:02:33,375 - INFO - ebcdbe060b05d5bafd5263a651e49244 GetCandles
+2026-11-26 16:02:33,474 - INFO - [DEBUG MA] fast_prev=6.1500 fast_last=6.1000 slow_prev=6.1500 slow_last=6.1167 len=406
+2026-11-26 16:02:33,474 - INFO - EUTR: HOLD (Нет пересечения MA)
+2026-11-26 16:02:33,475 - INFO - LSRG: позиция уже открыта/в неопределённости, пропуск
+2026-11-26 16:02:33,475 - INFO - MVID: позиция уже открыта/в неопределённости, пропуск
+2026-11-26 16:02:33,567 - INFO - 953bdc3797a6e021445d40090a22fadd GetCandles
+2026-11-26 16:02:33,686 - INFO - 0701e7dc779050458748fd295577bc72 GetCandles
+2026-11-26 16:02:33,780 - INFO - [DEBUG MA] fast_prev=280.8500 fast_last=281.3000 slow_prev=280.6333 slow_last=281.0667 len=406
+2026-11-26 16:02:33,781 - INFO - SMLT: HOLD (Нет пересечения MA)
+2026-11-26 16:02:33,781 - INFO - VKCO: позиция уже открыта/в неопределённости, пропуск
+2026-11-26 16:02:33,875 - INFO - a4cc77bbe800c6944e9f9c2b9dd1aac1 GetCandles
+2026-11-26 16:02:34,000 - INFO - fd8a65f37c9e81336c588275f7774a90 GetCandles
+2026-11-26 16:02:34,122 - INFO - [DEBUG MA] fast_prev=21.3400 fast_last=21.3700 slow_prev=21.3400 slow_last=21.3600 len=404
+2026-11-26 16:02:34,123 - INFO - ETLN: HOLD (Нет пересечения MA)
+2026-11-26 16:02:34,201 - INFO - 1a9263b4ddfe75e6dce885c7f4a24a42 GetCandles
+2026-11-26 16:02:34,344 - INFO - e6c8167ebda8441eb2ec891b7a95e095 GetCandles
+2026-11-26 16:02:34,454 - INFO - [DEBUG MA] fast_prev=19.9700 fast_last=20.0500 slow_prev=19.9333 slow_last=20.0000 len=405
+2026-11-26 16:02:34,455 - INFO - UWGN: HOLD (Нет пересечения MA)
+2026-11-26 16:02:34,455 - INFO - WUSH: позиция уже открыта/в неопределённости, пропуск
+2026-11-26 16:02:34,536 - INFO - 53eade75cdbc67b8e0f8488af3857cda GetCandles
+2026-11-26 16:02:34,647 - INFO - 5af0881e59c2f44f5d019c4aa71a878e GetCandles
+2026-11-26 16:02:34,757 - INFO - [DEBUG MA] fast_prev=59.8500 fast_last=59.9000 slow_prev=59.8333 slow_last=59.8667 len=394
+2026-11-26 16:02:34,759 - INFO - IVAT: HOLD (Нет пересечения MA)
+2026-11-26 16:02:34,864 - INFO - f09d2c3c6a72b1247284905c8338cc92 GetCandles
+2026-11-26 16:02:34,989 - INFO - ec3b181fab1a5b659d13d9fb1eba675e GetCandles
+2026-11-26 16:02:35,137 - INFO - [DEBUG MA] fast_prev=33.0200 fast_last=33.0200 slow_prev=33.0300 slow_last=33.0233 len=404
+2026-11-26 16:02:35,138 - INFO - SELG: HOLD (Нет пересечения MA)
+2026-11-26 16:03:05,257 - INFO - d83358458b1c17acb476ec5ded45302d GetLastPrices
+2026-11-26 16:03:05,288 - INFO - 947a64259a48ed8bf6bf0b03ae9b659a GetSandboxPortfolio
+2026-11-26 16:03:05,294 - INFO - [reconcile] Все позиции совпадают (4 активных).
+2026-11-26 16:03:05,338 - INFO - aac4e3ebd74dd8a9250c9b5551b27eeb GetSandboxPortfolio
+2026-11-26 16:03:05,415 - INFO - 1a4bb071b459d68686f246b68e618dc3 GetCandles
+2026-11-26 16:03:05,538 - INFO - 7558782a0c185086d764d9e81580edf1 GetCandles
+2026-11-26 16:03:05,660 - INFO - [DEBUG MA] fast_prev=6.1500 fast_last=6.1000 slow_prev=6.1500 slow_last=6.1167 len=406
+2026-11-26 16:03:05,661 - INFO - EUTR: HOLD (Нет пересечения MA)
+2026-11-26 16:03:05,661 - INFO - LSRG: позиция уже открыта/в неопределённости, пропуск
+2026-11-26 16:03:05,661 - INFO - MVID: позиция уже открыта/в неопределённости, пропуск
+2026-11-26 16:03:05,750 - INFO - 51c188153ba418fb367861075fedfc84 GetCandles
+2026-11-26 16:03:05,960 - INFO - a745723065b2b9d3ade85124b23f021a GetCandles
+2026-11-26 16:03:06,050 - INFO - [DEBUG MA] fast_prev=280.8500 fast_last=281.3000 slow_prev=280.6333 slow_last=281.0667 len=406
+2026-11-26 16:03:06,051 - INFO - SMLT: HOLD (Нет пересечения MA)
+2026-11-26 16:03:06,051 - INFO - VKCO: позиция уже открыта/в неопределённости, пропуск
+2026-11-26 16:03:06,124 - INFO - 4552753191240207bd5db990bfe17d7f GetCandles
+2026-11-26 16:03:06,219 - INFO - 5606d550e08398005a23c20fc8da9571 GetCandles
+2026-11-26 16:03:06,296 - INFO - [DEBUG MA] fast_prev=21.3400 fast_last=21.3700 slow_prev=21.3400 slow_last=21.3600 len=404
+2026-11-26 16:03:06,296 - INFO - ETLN: HOLD (Нет пересечения MA)
+2026-11-26 16:03:06,378 - INFO - f62bc3a88b190368ef3715a1b1e10a3e GetCandles
+2026-11-26 16:03:06,481 - INFO - 73bf0f886b7e23a796303521d59c5670 GetCandles
+2026-11-26 16:03:06,562 - INFO - [DEBUG MA] fast_prev=19.9700 fast_last=20.0500 slow_prev=19.9333 slow_last=20.0000 len=405
+2026-11-26 16:03:06,562 - INFO - UWGN: HOLD (Нет пересечения MA)
+2026-11-26 16:03:06,563 - INFO - WUSH: позиция уже открыта/в неопределённости, пропуск
+2026-11-26 16:03:06,675 - INFO - 4eaf828f34b5a2052c78c767542aca5a GetCandles
+2026-11-26 16:03:06,806 - INFO - 64b5c4b5165ccd4fb1947c074cb37cc1 GetCandles
+2026-11-26 16:03:06,896 - INFO - [DEBUG MA] fast_prev=59.8500 fast_last=59.9000 slow_prev=59.8333 slow_last=59.8667 len=394
+2026-11-26 16:03:06,897 - INFO - IVAT: HOLD (Нет пересечения MA)
+2026-11-26 16:03:06,972 - INFO - b47c0c84f2b9e48b7eff4019fee60e27 GetCandles
+2026-11-26 16:03:07,068 - INFO - faa3732d45e5404ddd8d24f6226f75b3 GetCandles
+2026-11-26 16:03:07,145 - INFO - [DEBUG MA] fast_prev=33.0200 fast_last=33.0200 slow_prev=33.0300 slow_last=33.0233 len=404
+2026-11-26 16:03:07,145 - INFO - SELG: HOLD (Нет пересечения MA)
