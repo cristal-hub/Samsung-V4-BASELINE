@@ -1,0 +1,16 @@
+STAGE D.1 — IMMUTABILITY PROOF (byte-level)
+Сравнение: рабочая копия Stage D.1 (candidate/) против ПРИНЯТОЙ Stage C.1 (pristine candidate, 177 файлов).
+Метод: SHA-256 каждого файла, обход __pycache__/.pytest_cache.
+
+pristine C.1 files: 177
+current Stage D.1 files: 179
+ADDED   (2):
+   + strategy_risk.py  sha256=7f25b4ef4bf9f2f9b90507caf7b4ff53a20b95f987c337bbf3d95496bcd22d66
+   + tests/test_stage_d_strategy_risk.py  sha256=0cade2967f68fc5bad648460adbec593dbe97a0fbc0771e7130fe2be0915ddf9
+REMOVED (0):
+MODIFIED (0):
+byte-identical common files: 177/177
+accepted-stage key files violations: 0 []
+A/B/C test violations: 0 []
+
+Вывод: единственные отличия от Stage C.1 — два файла Stage D (добавлены в Stage D, скорректированы в D.1). Все 177 файлов Stage C.1 байт-в-байт идентичны; файлы execution.py, main.py, risk_manager.py и прочие торговые/инфраструктурные модули не изменены.

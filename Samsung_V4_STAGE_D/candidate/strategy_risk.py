@@ -106,7 +106,9 @@ import json
 import math
 import re
 from dataclasses import dataclass
-from decimal import Decimal, localcontext
+from decimal import (Context, Decimal, DivisionByZero, InvalidOperation,
+                     localcontext, MAX_EMAX, MIN_EMIN, Overflow,
+                     ROUND_HALF_EVEN)
 from typing import Any, Mapping, Optional, Union
 
 from attribution import AttributionContext
@@ -137,6 +139,36 @@ SIZING_ROUNDING_METHOD = "DECIMAL_EXACT_FLOOR_TO_LOT"
 # контекста не возникает), а деления как операции не используются —
 # только точное целочисленное деление отношений (_floor_ratio).
 _DECIMAL_PRECISION = 5000
+
+# ЯВНО ЗАФИКСИРОВАННЫЙ контекст Decimal (Stage D.1): расчёт и валидатор
+# используют ПОЛНОСТЬЮ определённый контекст, а НЕ унаследованный от
+# окружения. localcontext() копирует ТЕКУЩИЙ контекст и раньше
+# переопределял ТОЛЬКО prec: враждебный ambient-контекст (чужой Emax/
+# Emin/rounding/traps — например, приложением, вызвавшим
+# decimal.setcontext() с узкими границами экспоненты) просачивался в
+# вычисление — операция получала Overflow/поднормальное округление и
+# детерминизм нарушался (ТЗ §10.17: ambient-контекст не влияет на
+# результат). Контекст фиксирует:
+#   * prec — точность выше любой точной операции (см. выше);
+#   * Emax/MIN_EMIN — экспоненциальные границы шире любых входов
+#     (float-входы ограничены |экспонентой| <= 308/324, произведения —
+#     ~+656/-648), Overflow/Underflow контекста невозможны;
+#   * rounding — явный режим (округления контекста всё равно не
+#     возникают: все операции точны); фиксация убирает зависимость от
+#     чужого режима;
+#   * traps — ровно [InvalidOperation, DivisionByZero, Overflow]
+#     (умолчания): чужие ловушки (Inexact/Rounded/Clamped/Subnormal/
+#     Underflow/…) не могут превратить точную операцию в исключение.
+# Один и тот же объект передаётся в localcontext(...) — он КОПИРУЕТ
+# контекст, поэтому модульный объект не мутируется и ambient-контекст
+# процесса не влияет ни на один бит результата.
+_SIZING_DECIMAL_CONTEXT = Context(
+    prec=_DECIMAL_PRECISION,
+    Emax=MAX_EMAX,
+    Emin=MIN_EMIN,
+    rounding=ROUND_HALF_EVEN,
+    traps=[InvalidOperation, DivisionByZero, Overflow],
+)
 
 # ---------------------------------------------------------------------------
 # Ошибки Stage D (самостоятельная иерархия; ошибки Stage A/B/C не
@@ -1243,9 +1275,12 @@ def _validate_sizing_result_exact(result: "SizingResult", *,
                                   inputs: Mapping, computed: Mapping) -> None:
     """Точная (Decimal) перепроверка расчётного результата по его
     диагностике. Вызывается из validate_sizing_result внутри
-    protected-блока; декорации ошибок — SizingResultViolationError."""
-    with localcontext() as ctx:
-        ctx.prec = _DECIMAL_PRECISION
+    protected-блока; декорации ошибок — SizingResultViolationError.
+
+    Контекст ЯВНО зафиксирован (_SIZING_DECIMAL_CONTEXT, Stage D.1):
+    враждебный ambient-контекст (Emax/Emin/rounding/traps) не влияет
+    на валидацию — результат валидатора детерминирован (ТЗ §10.17)."""
+    with localcontext(_SIZING_DECIMAL_CONTEXT):
         equity = Decimal(str(inputs.get("equity")))
         risk_fraction = Decimal(str(inputs.get("risk_per_trade_fraction")))
         notional_fraction = Decimal(
@@ -1644,6 +1679,12 @@ def _compute_sized_or_zero_size(*, policy: RiskPolicy,
     prec=5000; округления вниз — целочисленные _floor_ratio). Итоговые
     проверки лимитов — точные сравнения (defense-in-depth): нарушение
     невозможно по построению и конвертируется в блокирующий исход.
+
+    Контекст ЯВНО зафиксирован (_SIZING_DECIMAL_CONTEXT, Stage D.1):
+    ambient-контекст процесса (Emax/Emin/rounding/traps) не влияет ни
+    на одну операцию — расчёт детерминирован в любом окружении
+    (ТЗ §10.17: повторный расчёт идентичен, в т.ч. при чужом
+    ambient-контексте Decimal).
     """
     figi = sizing_input.figi or ""
     lot_size = int(sizing_input.lot_size)
@@ -1651,8 +1692,7 @@ def _compute_sized_or_zero_size(*, policy: RiskPolicy,
     config_hash = config.config_hash
     policy_hash = recomputed_hash
 
-    with localcontext() as ctx:
-        ctx.prec = _DECIMAL_PRECISION
+    with localcontext(_SIZING_DECIMAL_CONTEXT):
         equity_d = _to_decimal(float(sizing_input.available_equity))
         buying_power_d = _to_decimal(
             float(sizing_input.buying_power_limit))

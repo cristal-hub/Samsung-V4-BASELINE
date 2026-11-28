@@ -1,0 +1,29 @@
+STAGE D.1 — NEGATIVE TEST EVIDENCE
+Цель: доказать, что новые тесты D.1 перехватывают дефект ДО коррекции.
+Метод: в чистую копию пакета восстанавливается ПРЕДКОРРЕКЦИОННЫЙ strategy_risk.py (из поставленного Stage D ZIP), тесты остаются НОВЫМИ; прогон двух новых классов TestStageD1AmbientDecimalContextIsolation и TestStageD1ExactLimitBoundaries.
+
+original strategy_risk.py sha256: 2a29807e8818158216bffb01be609f8462ad0716e5ef5dc0d8aedff7782a7327
+pre-fix module restored into scratch; new tests in place
+---- negative run against PRE-FIX implementation ----
+        # _SIZING_DECIMAL_CONTEXT не мутируется ни вызовом расчёта, ни
+        # валидатором (иначе следующий вызов получил бы изменённый контекст).
+        import strategy_risk as sr
+>       before = decimal.Context.copy(sr._SIZING_DECIMAL_CONTEXT)
+                                      ^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       AttributeError: module 'strategy_risk' has no attribute '_SIZING_DECIMAL_CONTEXT'
+
+tests/test_stage_d_strategy_risk.py:1661: AttributeError
+=========================== short test summary info ============================
+FAILED tests/test_stage_d_strategy_risk.py::TestStageD1AmbientDecimalContextIsolation::test_hostile_emax_does_not_block_valid_sizing
+FAILED tests/test_stage_d_strategy_risk.py::TestStageD1AmbientDecimalContextIsolation::test_hostile_emax_with_overflow_trap_disabled
+FAILED tests/test_stage_d_strategy_risk.py::TestStageD1AmbientDecimalContextIsolation::test_fully_hostile_context_identical_result[5000-ROUND_HALF_EVEN-2--2]
+FAILED tests/test_stage_d_strategy_risk.py::TestStageD1AmbientDecimalContextIsolation::test_validator_passes_valid_result_under_hostile_context
+FAILED tests/test_stage_d_strategy_risk.py::TestStageD1AmbientDecimalContextIsolation::test_pinned_context_object_not_mutated_by_calls
+5 failed, 12 passed, 162 deselected in 0.48s
+
+new D.1 tests failing against pre-fix implementation: 5
+   FAILED tests/test_stage_d_strategy_risk.py::TestStageD1AmbientDecimalContextIsolation::test_hostile_emax_does_not_block_valid_sizing
+   FAILED tests/test_stage_d_strategy_risk.py::TestStageD1AmbientDecimalContextIsolation::test_hostile_emax_with_overflow_trap_disabled
+   FAILED tests/test_stage_d_strategy_risk.py::TestStageD1AmbientDecimalContextIsolation::test_fully_hostile_context_identical_result[5000-ROUND_HALF_EVEN-2--2]
+   FAILED tests/test_stage_d_strategy_risk.py::TestStageD1AmbientDecimalContextIsolation::test_validator_passes_valid_result_under_hostile_context
+   FAILED tests/test_stage_d_strategy_risk.py::TestStageD1AmbientDecimalContextIsolation::test_pinned_context_object_not_mutated_by_calls

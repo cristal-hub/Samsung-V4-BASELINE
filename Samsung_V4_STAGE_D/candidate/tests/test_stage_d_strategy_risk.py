@@ -1544,3 +1544,233 @@ class TestStageDErrorHierarchy:
             result = calculate_position_size(policy=policy, config=config,
                                              sizing_input=sizing_input)
             assert result.quantity == 0
+
+
+# ---------------------------------------------------------------------------
+# STAGE D.1 (коррекция): изоляция от ambient-контекста Decimal.
+# Аудит D.1 обнаружил дефект: localcontext() копирует ТЕКУЩИЙ контекст и
+# раньше переопределял ТОЛЬКО prec — чужие Emax/Emin/rounding/traps
+# просачивались в расчёт (Emax=2 -> Overflow -> ложный
+# COMPUTATION_ERROR_FAIL_CLOSED вместо SIZED 190) и в валидатор.
+# Исправление: полностью явный контекст _SIZING_DECIMAL_CONTEXT.
+# ---------------------------------------------------------------------------
+
+
+class TestStageD1AmbientDecimalContextIsolation:
+    """Stage D.1: ambient-контекст Decimal (Emax/Emin/rounding/traps) не
+    влияет ни на один бит результата расчёта и валидатора (ТЗ §10.17)."""
+
+    @staticmethod
+    def _reference():
+        config = make_config()
+        policy = make_policy(config)
+        inp = make_input(config)
+        return config, policy, inp, calculate_position_size(
+            policy=policy, config=config, sizing_input=inp)
+
+    def test_hostile_emax_does_not_block_valid_sizing(self):
+        # Дефект D.1 был здесь: Emax=2 -> Overflow на equity*fraction ->
+        # ложный COMPUTATION_ERROR_FAIL_CLOSED. Теперь результат идентичен.
+        config, policy, inp, reference = self._reference()
+        with decimal.localcontext() as ctx:
+            ctx.Emax = 2
+            distorted = calculate_position_size(policy=policy, config=config,
+                                                sizing_input=inp)
+        assert distorted == reference
+        assert distorted.quantity == 190
+        assert distorted.outcome is SizingOutcome.SIZED
+
+    def test_hostile_emax_with_overflow_trap_disabled(self):
+        # Emax=2 + выключенный Overflow-trap: без фиксации контекста
+        # операции получали Infinity; результат обязан остаться точным.
+        config, policy, inp, reference = self._reference()
+        with decimal.localcontext() as ctx:
+            ctx.Emax = 2
+            ctx.traps[decimal.Overflow] = False
+            distorted = calculate_position_size(policy=policy, config=config,
+                                                sizing_input=inp)
+        assert distorted == reference
+        assert distorted.quantity == 190
+
+    def test_hostile_emin_does_not_distort_result(self):
+        # Emin=-2: поднормальное округление малых величин не должно
+        # менять результат на обычных значениях.
+        config, policy, inp, reference = self._reference()
+        with decimal.localcontext() as ctx:
+            ctx.Emin = -2
+            distorted = calculate_position_size(policy=policy, config=config,
+                                                sizing_input=inp)
+        assert distorted == reference
+
+    def test_hostile_traps_do_not_convert_exact_ops_to_errors(self):
+        # Чужие ловушки Inexact/Rounded/Clamped/Subnormal/Underflow: все
+        # операции расчёта точны, ловушки не должны ничего менять.
+        config, policy, inp, reference = self._reference()
+        with decimal.localcontext() as ctx:
+            ctx.traps[decimal.Inexact] = True
+            ctx.traps[decimal.Rounded] = True
+            ctx.traps[decimal.Clamped] = True
+            ctx.traps[decimal.Subnormal] = True
+            ctx.traps[decimal.Underflow] = True
+            distorted = calculate_position_size(policy=policy, config=config,
+                                                sizing_input=inp)
+        assert distorted == reference
+
+    @pytest.mark.parametrize("prec,rounding,emax,emin", [
+        (2, decimal.ROUND_UP, 6, -6),
+        (3, decimal.ROUND_DOWN, 4, -4),
+        (9, decimal.ROUND_FLOOR, 999, -999),
+        (5000, decimal.ROUND_HALF_EVEN, 2, -2),
+        (28, decimal.ROUND_UP, 999999999, -999999999),
+    ])
+    def test_fully_hostile_context_identical_result(self, prec, rounding,
+                                                    emax, emin):
+        # Комбинации всех параметров контекста: результат побитово тот же
+        # (включая диагностику, деньги и объём) — ТЗ §10.17.
+        config, policy, inp, reference = self._reference()
+        with decimal.localcontext() as ctx:
+            ctx.prec = prec
+            ctx.rounding = rounding
+            ctx.Emax = emax
+            ctx.Emin = emin
+            ctx.traps[decimal.Overflow] = False
+            ctx.traps[decimal.Underflow] = False
+            distorted = calculate_position_size(policy=policy, config=config,
+                                                sizing_input=inp)
+        assert distorted == reference
+        assert distorted.quantity == reference.quantity
+        assert distorted.diagnostics == reference.diagnostics
+
+    def test_validator_passes_valid_result_under_hostile_context(self):
+        # Валидатор тоже обязан быть изолирован: враждебный контекст не
+        # должен превращать точную перепроверку в ложное отклонение.
+        config, policy, inp, result = self._reference()
+        with decimal.localcontext() as ctx:
+            ctx.Emax = 2
+            ctx.Emin = -2
+            ctx.traps[decimal.Inexact] = True
+            validate_sizing_result(result, expected_policy=policy,
+                                   expected_config=config,
+                                   expected_input=inp)
+
+    def test_pinned_context_object_not_mutated_by_calls(self):
+        # localcontext() работает с КОПИЕЙ контекста: модульный объект
+        # _SIZING_DECIMAL_CONTEXT не мутируется ни вызовом расчёта, ни
+        # валидатором (иначе следующий вызов получил бы изменённый контекст).
+        import strategy_risk as sr
+        before = decimal.Context.copy(sr._SIZING_DECIMAL_CONTEXT)
+        config, policy, inp, _ = self._reference()
+        calculate_position_size(policy=policy, config=config,
+                                sizing_input=inp)
+        validate_sizing_result(self._reference()[3],
+                               expected_policy=policy,
+                               expected_config=config)
+        after = decimal.Context.copy(sr._SIZING_DECIMAL_CONTEXT)
+        assert after.prec == before.prec
+        assert after.Emax == before.Emax
+        assert after.Emin == before.Emin
+        assert after.rounding == before.rounding
+        assert list(after.traps) == list(before.traps)
+
+    def test_zero_size_also_context_independent(self):
+        # Блокирующие расчётные исходы тоже детерминированы при чужом
+        # ambient-контексте.
+        config = make_config()
+        policy = make_policy(config)
+        inp = make_input(config, available_equity=40.0)  # < 1 лота
+        reference = calculate_position_size(policy=policy, config=config,
+                                            sizing_input=inp)
+        assert reference.outcome is SizingOutcome.ZERO_SIZE
+        with decimal.localcontext() as ctx:
+            ctx.Emax = 2
+            ctx.Emin = -2
+            ctx.rounding = decimal.ROUND_UP
+            distorted = calculate_position_size(policy=policy, config=config,
+                                                sizing_input=inp)
+        assert distorted == reference
+
+
+# ---------------------------------------------------------------------------
+# STAGE D.1 (коррекция): точные границы notional cap и buying power
+# (ТЗ D.1 §5: «точная граница notional cap и buying power»; границы
+# бюджета/лота уже покрыты §10.4–§10.5 выше).
+# ---------------------------------------------------------------------------
+
+
+class TestStageD1ExactLimitBoundaries:
+    def test_exact_notional_cap_edge_sized_at_cap(self):
+        # max_notional = 20000; per-unit notional = 100 -> РОВНО 200
+        # единиц на границе: SIZED 200, notional == cap (не превышен).
+        config = make_config()
+        policy = make_policy(config, risk=1.0, cap=0.2)
+        inp = make_input(config, available_equity=100000.0,
+                         buying_power_limit=10 ** 9,
+                         entry_cost_per_unit=0.0,
+                         stop_exit_cost_per_unit=0.0, lot_size=1)
+        result = calculate_position_size(policy=policy, config=config,
+                                         sizing_input=inp)
+        assert result.outcome is SizingOutcome.SIZED
+        assert result.quantity == 200
+        assert result.position_notional == pytest.approx(20000.0)
+        assert result.diagnostics["units_by_notional"] == 200
+        validate_sizing_result(result, expected_policy=policy,
+                               expected_config=config, expected_input=inp)
+
+    def test_just_under_notional_cap_edge(self):
+        # cap 19999 -> floor(19999/100) = 199 единиц (граница соблюдена).
+        config = make_config()
+        policy = make_policy(config, risk=1.0, cap=0.19999)
+        inp = make_input(config, available_equity=100000.0,
+                         buying_power_limit=10 ** 9,
+                         entry_cost_per_unit=0.0,
+                         stop_exit_cost_per_unit=0.0, lot_size=1)
+        result = calculate_position_size(policy=policy, config=config,
+                                         sizing_input=inp)
+        assert result.outcome is SizingOutcome.SIZED
+        assert result.quantity == 199
+
+    def test_exact_buying_power_edge_sized_at_limit(self):
+        # per-unit bp cost = 100.05; bp = 10005 -> РОВНО 100 единиц:
+        # расход bp в точности равен лимиту (не превышен).
+        config = make_config()
+        policy = make_policy(config, risk=1.0, cap=1.0)
+        inp = make_input(config, available_equity=100000.0,
+                         buying_power_limit=10005.0,
+                         entry_cost_per_unit=0.05,
+                         stop_exit_cost_per_unit=0.0, lot_size=1)
+        result = calculate_position_size(policy=policy, config=config,
+                                         sizing_input=inp)
+        assert result.outcome is SizingOutcome.SIZED
+        assert result.quantity == 100
+        assert result.diagnostics["limiting_constraint"]["binding"] == \
+            "BUYING_POWER"
+        assert decimal.Decimal("100") * (decimal.Decimal("100") +
+                                         decimal.Decimal("0.05")) == \
+            decimal.Decimal("10005")
+        validate_sizing_result(result, expected_policy=policy,
+                               expected_config=config, expected_input=inp)
+
+    def test_just_under_buying_power_edge(self):
+        # bp = 10004.99 -> floor = 99 единиц (лимит не превышен).
+        config = make_config()
+        policy = make_policy(config, risk=1.0, cap=1.0)
+        inp = make_input(config, available_equity=100000.0,
+                         buying_power_limit=10004.99,
+                         entry_cost_per_unit=0.05,
+                         stop_exit_cost_per_unit=0.0, lot_size=1)
+        result = calculate_position_size(policy=policy, config=config,
+                                         sizing_input=inp)
+        assert result.outcome is SizingOutcome.SIZED
+        assert result.quantity == 99
+
+    def test_zero_buying_power_beats_exact_one_lot_risk(self):
+        # Ровно один лот по бюджету, но bp = 0: итог ZERO_SIZE по
+        # buying power (все ограничения соблюдаются одновременно).
+        config = make_config()
+        policy = make_policy(config, risk=0.01, cap=0.2)
+        result = calculate_position_size(
+            policy=policy, config=config,
+            sizing_input=make_input(config, available_equity=5100.0,
+                                    buying_power_limit=0.0))
+        assert_blocked(result, SizingOutcome.ZERO_SIZE,
+                       REASON_BUYING_POWER_BELOW_ONE_LOT)

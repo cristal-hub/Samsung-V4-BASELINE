@@ -1,0 +1,16 @@
+STAGE D.1 — SHA-256 MANIFEST (изменённые файлы)
+Сформирован: 2026-11-28T10:10:08Z
+База сравнения: Stage D как поставлен (Samsung_V4_STAGE_D.zip).
+
+Файл: candidate/strategy_risk.py
+Статус: MODIFIED
+Причина: Stage D.1: полностью явный Decimal-контекст (_SIZING_DECIMAL_CONTEXT) в расчёте и валидаторе — устранение просачивания ambient Emax/Emin/rounding/traps (дефект детерминизма ТЗ §10.17)
+SHA-256 исходной версии (Stage D): 2a29807e8818158216bffb01be609f8462ad0716e5ef5dc0d8aedff7782a7327
+SHA-256 новой версии   (Stage D.1): 7f25b4ef4bf9f2f9b90507caf7b4ff53a20b95f987c337bbf3d95496bcd22d66
+
+Файл: candidate/tests/test_stage_d_strategy_risk.py
+Статус: MODIFIED
+Причина: Stage D.1: добавлены 17 тестов (2 класса): изоляция ambient Decimal-контекста (8 тестов + 5 параметризованных) и точные границы notional cap / buying power; старые 162 теста не изменены
+SHA-256 исходной версии (Stage D): 38c550f51eb34d88110dd24db5eeac7306a4df346549ec502dd3dcfafcfad073
+SHA-256 новой версии   (Stage D.1): 0cade2967f68fc5bad648460adbec593dbe97a0fbc0771e7130fe2be0915ddf9
+
