@@ -1,29 +1,33 @@
-STAGE E.1 — SHA-256 MANIFEST ПОСТАВКИ
+STAGE E.1 — SHA-256 MANIFEST ПОСТАВКИ (ФИНАЛЬНЫЕ ПРАВКИ)
 
-Формат: SHA-256  относительный_путь
+Формат: SHA-256  относительный_путь (путь внутри candidate/).
 Поставка: Samsung_V4_STAGE_E1 (исправленный пакет historical_engine +
-тесты Stage E/E.1). Файлы вне перечня не входят в поставку и
-совпадают байт-в-байт с принятым Stage E (см. NO_CHANGES_ABCD_PROOF).
+тесты Stage E/E.1) ПОСЛЕ финальных правок. Архив финальных правок
+содержит ТОЛЬКО изменённые файлы и отчёты; файлы вне архива остаются
+без изменений и совпадают байт-в-байт с принятым Stage E (см.
+NO_CHANGES_ABCD_PROOF). Хеши здесь — контрольные для ВСЕХ 20 файлов
+candidate (неизменные файлы дают те же хеши, что и в manifest
+первоначальной поставки E.1).
 
 73de9c3e3bca48cc37f19bda3f8b4775ac869023a9edd65946aa14f84403bfd0  candidate/historical_engine/__init__.py
 31d767c4db454af0fef2cfd82a76bc9781fcd1fe64025cc31ac3b95f345c70fe  candidate/historical_engine/models.py
-627b69f343d2d85e0b9205eab7aa36de0f0152b3c25be45489b27c03566bda06  candidate/historical_engine/data_feed.py
+1959fb9b10476741bf2695ad60f1e06670a698b2ecb3bb27c47fd8b140c768d5  candidate/historical_engine/calendar.py
+ff4445cfade91b7bdecf5237ce1a1efe5aae0c0969049091ed9e62f48ca899e1  candidate/historical_engine/data_feed.py
 a9cba109cc378607f4d7493532533bce600ae9668e6682af9392014bc3d1e026  candidate/historical_engine/ledger.py
 467899281f4d111e615edd79ea0e8b364794d91477b4a3d444962bbd181e7d91  candidate/historical_engine/risk_integration.py
-be18ecbcd38f705aca8f8e2a52f76c13cf584263f9b52dd36fdc54d3db428a67  candidate/historical_engine/execution.py
+93ba848fe44d89e636f99d467427cae325a63b613f11f7ae12f2de88cfc8a322  candidate/historical_engine/execution.py
 79ad78b75f5e962c9c07d9d5d88758d85d138fd7068ffafaeda4c3a5fe9cf3a6  candidate/historical_engine/strategy_runner.py
 5392eba3701ee6993cee91d9d3dd22146a7b23c446b6af084a3c1104c7c89a54  candidate/historical_engine/event_engine.py
 ba956324c5206227243f109e269705ae97bb9948bff25e30a7d4ccca5c4a4034  candidate/historical_engine/report.py
 00d9601dcd2f4348d55fe066fa3b466b31dc85631fab0a062b7c5cb706aaec3b  candidate/historical_engine/engine.py
-66ba8629cfbb4f567438cab15dd5d9fc96608027a66d425a44dc484bce8ade11  candidate/historical_engine/calendar.py
 51d0946d16380e1908e8adca7200d69b934ae986e1f4d0dfca58da1b2dd0015e  candidate/tests/stage_e_tools.py
 dbd4155a2d06a2ba32775625f56237d0675b65a5b4b16632dd96e4ddf863472a  candidate/tests/test_stage_e_data_feed.py
 dc906b3e4fdfac5efe8da00324b7b2c0e979a3b51863c353553afa7c7164fd73  candidate/tests/test_stage_e_engine_decisions.py
 898071e2dd04bc5a8e95d6926d97f54daa6335f57769ba10ebfd4dbf15600295  candidate/tests/test_stage_e_execution_ledger.py
 c1a6cddaad3d8ed07012c7f3580a2658b6dc221dbcac37be4cad9604029964b3  candidate/tests/test_stage_e_integration.py
 306ad6b63e89becb94b6c5af64d03bfd710c6e0ca64fb29e770ecfcede3d3956  candidate/tests/test_stage_e_report.py
-211aa4c8da57b2ceda07861fbaf51129b8add5724ef84e3aeb1b0a75555e1023  candidate/tests/test_stage_e1_calendar.py
-3eaf5026a89c42cd0cd4a99ca10e0bcd2782237d274f5816b4a5f232360de1b0  candidate/tests/test_stage_e1_slippage.py
+7ae405df39d700929abaad876f111f6d4e0d5a3f71a0aa86aafc6c82bd7d68d2  candidate/tests/test_stage_e1_calendar.py
+7c4c69659652d5ecdfc6781af470ef643e44a6bf6e00a541054ea06681ef3791  candidate/tests/test_stage_e1_slippage.py
 7e43845713997eb98060703c520100d292d54be0876da751e26c28e6520e7df0  candidate/tests/test_stage_e1_config_consistency.py
 
-Всего файлов в поставке: 20
+Всего файлов candidate в поставке: 20

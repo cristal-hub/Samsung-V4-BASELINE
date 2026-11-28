@@ -20,6 +20,16 @@
 #      проверить пропуск НЕВОЗМОЖНО: календарь не передан или отклонение
 #      лежит вне покрытого календарём диапазона дат.
 #
+# ПОКРЫТИЕ ВСЕЙ СЕРИИ (Stage E.1 FINAL CORRECTIONS, Correction 1):
+#   analyze_series() проверяет покрытие календарём ДЛЯ ВСЕЙ исследуемой
+#   серии НЕЗАВИСИМО от наличия обнаруженных отклонений: начало и конец
+#   серии проверяются ОТДЕЛЬНО (граничные свечи не входят ни в один
+#   межсвечный интервал и прежде не классифицировались вовсе). Если хотя
+#   бы часть серии (граница или межсвечное окно) вне покрытия — итоговый
+#   статус проверки НЕ МОЖЕТ быть PERFORMED_FULL_CALENDAR_VERIFIED;
+#   непокрытые даты НЕ считаются выходными или праздниками. См.
+#   data_feed.py: статус PARTIAL при любом инциденте категории D.
+#
 # КОНТРАКТ КАЛЕНДАРЯ (задокументирован, без предположений):
 #   * календарь получает торговые интервалы ИСКЛЮЧИТЕЛЬНО из явно
 #     переданных сессий (никакой автозагрузки, никакой сети);
@@ -287,6 +297,22 @@ class TradingCalendar:
                 НЕ подтверждение полноты данных, а явная ограниченность
                 проверки.
 
+        ПОКРЫТИЕ ВСЕЙ СЕРИИ (Stage E.1 FINAL CORRECTIONS, Correction 1):
+        независимо от наличия межсвечных отклонений НАЧАЛО и КОНЕЦ серии
+        (метки первой и последней свечи) классифицируются ОТДЕЛЬНО.
+        Граничная свеча не входит ни в один межсвечный интервал, поэтому
+        прежде серия, все пары которой лежали ровно через интервал, могла
+        получить «полное подтверждение» даже при датах ВНЕ покрытия
+        календаря. Теперь непокрытая граница даёт инцидент категории D
+        (UNVERIFIED_OUTSIDE_CALENDAR_COVERAGE) — статус проверки в
+        data_feed не может быть полным. Непокрытые даты НЕ классифицируются
+        как выходные или праздники. Достаточность граничной проверки:
+        покрытие — НЕПРЕРЫВНЫЙ диапазон дат в поясе календаря, метки серии
+        строго возрастают, поэтому локальные даты свечей монотонны; если
+        первая и последняя даты внутри диапазона — все промежуточные тоже
+        (промежуточные окна дополнительно проверяются попарной логикой
+        выше).
+
         Данные НИКОГДА не интерполируются и не заполняются.
         """
         if not isinstance(expected_interval_seconds, int) \
@@ -413,6 +439,36 @@ class TradingCalendar:
                     missing_expected_count=0,
                     details=details,
                 ))
+        # --- ПОКРЫТИЕ ВСЕЙ СЕРИИ (Stage E.1 FINAL CORRECTIONS, Correction 1) ---
+        # Граничные свечи (первая и последняя) не входят ни в один
+        # межсвечный интервал: их классификация выполняется ОТДЕЛЬНО и
+        # НЕЗАВИСИМО от наличия обнаруженных выше отклонений. Граница вне
+        # покрытия календаря — инцидент категории D (проверить невозможно);
+        # непокрытая дата НЕ считается выходным или праздником, а статус
+        # проверки в data_feed не может быть PERFORMED_FULL_CALENDAR_VERIFIED.
+        for boundary_name, boundary_moment in (
+                ("series_start", series.candles[0].timestamp),
+                ("series_end", series.candles[-1].timestamp)):
+            if self.classify_moment(boundary_moment) \
+                    != MOMENT_CATEGORY_OUTSIDE_CALENDAR_COVERAGE:
+                continue
+            incidents.append(GapIncident(
+                category=GAP_CATEGORY_UNVERIFIED_OUTSIDE_CALENDAR_COVERAGE,
+                expected_timestamp_iso=boundary_moment.isoformat(),
+                next_actual_timestamp_iso=boundary_moment.isoformat(),
+                gap_seconds=0,
+                missing_expected_count=0,
+                details={
+                    "reason": "series_boundary_outside_calendar_coverage",
+                    "series_boundary": boundary_name,
+                    "series_boundary_timestamp_iso":
+                        boundary_moment.isoformat(),
+                    "calendar_coverage_start_date":
+                        self.coverage_start_date.isoformat(),
+                    "calendar_coverage_end_date":
+                        self.coverage_end_date.isoformat(),
+                },
+            ))
         return tuple(incidents)
 
     # --- отпечаток конфигурации ---------------------------------------------------

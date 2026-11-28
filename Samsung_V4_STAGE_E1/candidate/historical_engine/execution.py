@@ -28,6 +28,7 @@
 
 from __future__ import annotations
 
+import math
 from typing import Any, Dict, Optional, Tuple
 
 from .ledger import ClosedTrade, OpenPosition, PortfolioLedger
@@ -48,6 +49,34 @@ from strategy_risk import SizingOutcome
 # Направление сделки для учёта отклонения цены исполнения (Correction 2).
 SIDE_BUY = "BUY"
 SIDE_SELL = "SELL"
+
+
+def _validated_finite_positive(value: Any, name: str) -> float:
+    """Валидация числового аргумента split_execution_deviation
+    (Stage E.1 FINAL CORRECTIONS, Correction 2).
+
+    Требования: конечное число СТРОГО больше нуля. Через math.isfinite()
+    отклоняются: NaN, +Infinity, -Infinity, нулевые и отрицательные
+    значения, bool и нечисловые типы. Целые, не представимые конечным
+    float, тоже отклоняются (fail-closed: значение не может участвовать
+    в float-арифметике без потери точности).
+    """
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise ExecutionError(
+            f"split_execution_deviation: {name} должен быть числом "
+            f"(bool запрещён); получено {type(value).__name__}")
+    try:
+        as_float = float(value)
+    except (OverflowError, ValueError) as exc:
+        raise ExecutionError(
+            f"split_execution_deviation: {name} не представим конечным "
+            f"float; получено {value!r}") from exc
+    if not math.isfinite(as_float) or as_float <= 0.0:
+        raise ExecutionError(
+            f"split_execution_deviation: {name} должен быть конечным "
+            "числом > 0 (math.isfinite: NaN, +Infinity, -Infinity, нулевые "
+            f"и отрицательные значения отклоняются); получено {value!r}")
+    return as_float
 
 
 def split_execution_deviation(*, side: str, reference_price: float,
@@ -76,6 +105,15 @@ def split_execution_deviation(*, side: str, reference_price: float,
         «проскальзыванием»);
       * комиссия здесь НЕ участвует — она остаётся отдельным показателем.
 
+    ВАЛИДАЦИЯ ЧИСЕЛ (Stage E.1 FINAL CORRECTIONS, Correction 2):
+    конечность ВСЕХ числовых аргументов (reference_price,
+    execution_price, quantity, contract_multiplier) проверяется через
+    math.isfinite(); отклоняются NaN, +Infinity, -Infinity, нулевые и
+    отрицательные значения там, где они недопустимы (все четыре аргумента
+    обязаны быть строго положительными; quantity — целое). Раньше
+    +Infinity проходил проверку знаком и заражал показатели Inf/NaN —
+    теперь fail-closed: ExecutionError до любых вычислений.
+
     reference_price — «сырая» опорная цена ОПЕРАЦИИ: open свечи исполнения
     (вход/стратегический выход), уровень стопа/цели (защитный выход),
     гэповое open (выход гэпом через стоп). Не путать с уровнем сигнала:
@@ -86,27 +124,28 @@ def split_execution_deviation(*, side: str, reference_price: float,
         raise ExecutionError(
             f"split_execution_deviation: сторона должна быть "
             f"'{SIDE_BUY}' или '{SIDE_SELL}'; получено {side!r}")
-    for name, value in (("reference_price", reference_price),
-                        ("execution_price", execution_price)):
-        if isinstance(value, bool) or not isinstance(value, (int, float)) \
-                or float(value) <= 0.0 or float(value) != float(value):
-            raise ExecutionError(
-                f"split_execution_deviation: {name} должен быть конечным "
-                f"числом > 0; получено {value!r}")
-    if isinstance(quantity, bool) or not isinstance(quantity, int) \
-            or quantity <= 0:
+    # Stage E.1 FINAL CORRECTIONS (Correction 2): конечность всех числовых
+    # аргументов через math.isfinite() ДО любых вычислений (fail-closed).
+    reference_price = _validated_finite_positive(reference_price,
+                                                 "reference_price")
+    execution_price = _validated_finite_positive(execution_price,
+                                                 "execution_price")
+    if isinstance(quantity, bool) or not isinstance(quantity, int):
         raise ExecutionError(
             f"split_execution_deviation: quantity должен быть int > 0; "
             f"получено {quantity!r}")
-    if isinstance(contract_multiplier, bool) \
-            or not isinstance(contract_multiplier, (int, float)) \
-            or float(contract_multiplier) <= 0.0 \
-            or float(contract_multiplier) != float(contract_multiplier):
+    try:
+        quantity_finite = math.isfinite(quantity)
+    except OverflowError as exc:
         raise ExecutionError(
-            "split_execution_deviation: contract_multiplier должен быть "
-            f"конечным числом > 0; получено {contract_multiplier!r}")
-    reference_price = float(reference_price)
-    execution_price = float(execution_price)
+            "split_execution_deviation: quantity не представим конечным "
+            f"float; получено {quantity!r}") from exc
+    if not quantity_finite or quantity <= 0:
+        raise ExecutionError(
+            f"split_execution_deviation: quantity должен быть int > 0; "
+            f"получено {quantity!r}")
+    contract_multiplier = _validated_finite_positive(
+        contract_multiplier, "contract_multiplier")
     size = quantity * contract_multiplier
     if side == SIDE_BUY:
         adverse_delta = execution_price - reference_price

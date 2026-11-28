@@ -1,122 +1,76 @@
-STAGE E.1 — РЕЗУЛЬТАТЫ РЕГРЕССИОННЫХ ТЕСТОВ
-===========================================
+STAGE E.1 (ФИНАЛЬНЫЕ ПРАВКИ) — РЕЗУЛЬТАТЫ РЕГРЕССИОННЫХ ТЕСТОВ
+==============================================================
+
+РАУНД 2: Correction 1 — покрытие календарём ВСЕЙ серии (границы серии);
+         Correction 2 — валидация конечности чисел math.isfinite().
+База сравнения: первоначальная поставка Samsung_V4_STAGE_E1 (1696/1176).
 
 УСЛОВИЯ ПРОГОНА
   Полностью офлайн: синтетические данные, виртуальное исполнение,
   ни одного сетевого запроса / брокерского SDK / Sandbox / LIVE ордера.
 
 СЧЁТЧИКИ (python -m pytest из корня candidate)
-  КАНОНИЧЕСКИЙ (tests/):  ДО  1130 passed in 13.76s
-                          ПОСЛЕ  1176 passed in 13.64s
-  ПОЛНЫЙ (всё дерево):    ДО  1650 passed in 24.92s
-                          ПОСЛЕ  1696 passed in 24.73s
-  verbose-итог полного:  ============================ 1696 passed in 25.63s =============================
+  КАНОНИЧЕСКИЙ (tests/):  ДО  1176 passed in 13.52s
+                          ПОСЛЕ  1208 passed in 14.61s
+  ПОЛНЫЙ (всё дерево):    ДО  1696 passed in 24.61s
+                          ПОСЛЕ  1728 passed in 26.29s
+  verbose-итог полного:  ============================ 1728 passed in 26.23s =============================
 
-  Дельта: full 1650 -> 1696 (+46), canonical 1130 -> 1176 (+46).
+  Отдельные группы (ПОСЛЕ):
+    все тесты Stage E + Stage E.1:  158 passed in 3.93s
+    все тесты Stage A–D:            799 passed in 5.86s
+
+  Дельта: full 1696 -> 1728 (+32), canonical 1176 -> 1208 (+32).
   0 failed, 0 skipped-изменений, 0 удалённых/ослабленных тестов.
 
-NO-TEST-LOSS (сравнение ID тестов ДО/ПОСЛЕ)
-  Тестов ДО:  1399
-  Тестов ПОСЛЕ: 1445
+NO-TEST-LOSS (сравнение ID тестов ДО/ПОСЛЕ, нормализованные ID с учётом
+каталога tests/ vs корень; см. рабочий артефакт no-test-loss)
+  Тестов ДО:  1696 (tests/: 1176, root: 520)
+  Тестов ПОСЛЕ: 1728 (tests/: 1208, root: 520)
   ПОТЕРЯНО: 0
-  ДОБАВЛЕНО: 46
+  ДОБАВЛЕНО: 32
 
-НОВЫЕ ТЕСТЫ (46)
-  + test_stage_e1_calendar.py::test_calendar_analysis_is_deterministic
-  + test_stage_e1_calendar.py::test_calendar_sha256_sensitive_to_timezone_presentation
-  + test_stage_e1_calendar.py::test_calendar_validates_fail_closed
-  + test_stage_e1_calendar.py::test_gap_control_disabled_with_calendar_is_explicit
-  + test_stage_e1_calendar.py::test_gap_verification_reaches_report
-  + test_stage_e1_calendar.py::test_holiday_transition_is_not_a_gap
-  + test_stage_e1_calendar.py::test_incomplete_calendar_reports_limited_verification
-  + test_stage_e1_calendar.py::test_intraday_break_is_not_a_gap
-  + test_stage_e1_calendar.py::test_irregular_spacing_confirmed_even_with_calendar
-  + test_stage_e1_calendar.py::test_missed_candle_inside_session_is_confirmed_gap
-  + test_stage_e1_calendar.py::test_missing_calendar_is_explicit_limited_chronology_check
-  + test_stage_e1_calendar.py::test_outside_coverage_moment_is_unclassified
-  + test_stage_e1_calendar.py::test_overnight_break_is_not_a_gap
-  + test_stage_e1_calendar.py::test_regular_sequence_has_no_incidents
-  + test_stage_e1_calendar.py::test_report_records_confirmed_gap_without_rejection
-  + test_stage_e1_calendar.py::test_session_boundary_moments_are_not_trading_time
-  + test_stage_e1_calendar.py::test_strict_accepts_normal_breaks_with_calendar
-  + test_stage_e1_calendar.py::test_strict_rejects_confirmed_gap_with_calendar
-  + test_stage_e1_calendar.py::test_weekend_transition_is_not_a_gap
-  + test_stage_e1_config_consistency.py::test_both_calendars_absent_accepted
-  + test_stage_e1_config_consistency.py::test_calendar_config_plumbed_into_report
-  + test_stage_e1_config_consistency.py::test_calendar_mismatch_rejected
-  + test_stage_e1_config_consistency.py::test_calendar_presence_mismatch_rejected
-  + test_stage_e1_config_consistency.py::test_gap_policy_mismatch_rejected
-  + test_stage_e1_config_consistency.py::test_identical_configs_accepted
-  + test_stage_e1_config_consistency.py::test_interval_mismatch_rejected
-  + test_stage_e1_config_consistency.py::test_mismatch_diagnostic_lists_all_differences
-  + test_stage_e1_config_consistency.py::test_no_calendar_unrelated_parameters_not_compared
-  + test_stage_e1_config_consistency.py::test_no_side_effects_on_rejection
-  + test_stage_e1_config_consistency.py::test_timezone_presentation_mismatch_rejected
-  + test_stage_e1_slippage.py::test_adverse_slippage_on_buy
-  + test_stage_e1_slippage.py::test_adverse_slippage_on_sell
-  + test_stage_e1_slippage.py::test_commission_correct_and_separate
-  + test_stage_e1_slippage.py::test_execution_above_take_profit_after_gap_up
-  + test_stage_e1_slippage.py::test_execution_below_stop_loss_after_gap_down
-  + test_stage_e1_slippage.py::test_final_pnl_correctness
-  + test_stage_e1_slippage.py::test_money_invariant_with_price_improvement
-  + test_stage_e1_slippage.py::test_no_negative_slippage_expenses_anywhere
-  + test_stage_e1_slippage.py::test_normal_execution_without_improvement
-  + test_stage_e1_slippage.py::test_price_improvement_on_buy_direction_aware_formula
-  + test_stage_e1_slippage.py::test_price_improvement_on_sell_direction_aware_formula
-  + test_stage_e1_slippage.py::test_report_costs_backward_compatible
-  + test_stage_e1_slippage.py::test_signed_deviation_identity_adverse_minus_improvement
-  + test_stage_e1_slippage.py::test_slippage_split_determinism_in_report
-  + test_stage_e1_slippage.py::test_split_function_validates_fail_closed
-  + test_stage_e1_slippage.py::test_zero_slippage_configuration
+НОВЫЕ ТЕСТЫ (32)
 
-ПОКРЫТИЕ ТРЕБОВАНИЙ ТЗ E.1
+Correction 1 — ФИНАЛЬНЫЕ ПРАВКИ: покрытие ВСЕЙ серии (9)
+  1. вся серия вне календарного покрытия              test_series_entirely_outside_calendar_coverage_reports_partial
+  2. начало серии вне покрытия                        test_series_start_outside_coverage_reports_partial
+  3. конец серии вне покрытия                         test_series_end_outside_coverage_reports_partial
+  4. серия полностью покрыта (статус FULL сохранён)   test_series_fully_covered_boundary_check_keeps_full_status
+  5. без пропусков, но даты серии вне покрытия        test_contiguous_series_without_gaps_but_uncovered_dates_is_partial
+  6. выходные/перерывы обрабатываются как прежде      test_weekends_and_session_breaks_unchanged_after_boundary_check
+  7. STRICT не отклоняет неподтверждённое             test_strict_does_not_reject_series_outside_coverage
+  8. детерминизм граничных инцидентов                 test_boundary_coverage_incidents_are_deterministic
+  9. статус PARTIAL доходит до отчёта прогона         test_report_reflects_partial_status_for_uncovered_series
 
-Correction 1 (§3.5 — 12 обязательных):
-  1.  обычная последовательность свечей              test_regular_sequence_has_no_incidents
-  2.  пропущенная свеча внутри сессии                test_missed_candle_inside_session_is_confirmed_gap
-  3.  переход через ночной перерыв                   test_overnight_break_is_not_a_gap
-  4.  переход через выходные                         test_weekend_transition_is_not_a_gap
-  5.  переход через праздничный день                 test_holiday_transition_is_not_a_gap
-  6.  внутридневной перерыв                          test_intraday_break_is_not_a_gap
-  7.  неполный календарь                             test_incomplete_calendar_reports_limited_verification
-  8.  отсутствующий календарь                        test_missing_calendar_is_explicit_limited_chronology_check
-  9.  граница торговой сессии                        test_session_boundary_moments_are_not_trading_time
-  10. STRICT при реальном пропуске                   test_strict_rejects_confirmed_gap_with_calendar
-  11. STRICT при нормальном перерыве                 test_strict_accepts_normal_breaks_with_calendar
-  12. REPORT при реальном пропуске                   test_report_records_confirmed_gap_without_rejection
-  + доп.: нерегулярный интервал, детерминизм, отпечаток пояса,
-          fail-closed валидация календаря, interval=None, отчётный статус.
-
-Correction 2 (§4.5 — 12 обязательных):
-  1.  неблагоприятное проскальзывание при покупке    test_adverse_slippage_on_buy
-  2.  неблагоприятное проскальзывание при продаже    test_adverse_slippage_on_sell
-  3.  улучшение цены при покупке                     test_price_improvement_on_buy_direction_aware_formula
-  4.  улучшение цены при продаже                     test_price_improvement_on_sell_direction_aware_formula
-  5.  обычное исполнение без улучшения               test_normal_execution_without_improvement
-  6.  исполнение выше TP после гэпа                  test_execution_above_take_profit_after_gap_up
-  7.  исполнение ниже SL после гэпа                  test_execution_below_stop_loss_after_gap_down
-  8.  нулевое проскальзывание                        test_zero_slippage_configuration
-  9.  корректность комиссии                          test_commission_correct_and_separate
-  10. сохранение денежного инварианта                test_money_invariant_with_price_improvement
-  11. корректность итогового PnL                     test_final_pnl_correctness
-  12. отсутствие отрицательных расходов              test_no_negative_slippage_expenses_anywhere
-  + доп.: fail-closed split, обратная совместимость полей отчёта,
-          детерминизм отчёта, cap по high.
-
-Correction 3 (§5.3 — 7 обязательных):
-  1.  полное совпадение конфигураций                 test_identical_configs_accepted
-  2.  различие expected_candle_interval_seconds      test_interval_mismatch_rejected
-  3.  различие gap_policy                            test_gap_policy_mismatch_rejected
-  4.  различие календарей                            test_calendar_mismatch_rejected
-  5.  отсутствующий календарь с обеих сторон         test_both_calendars_absent_accepted
-  6.  различающиеся timezone settings                test_timezone_presentation_mismatch_rejected
-  7.  отсутствие побочных эффектов при отказе        test_no_side_effects_on_rejection
-  + доп.: presence-несовместимость, прокладка календаря в отчёт,
-          полная диагностика всех различий, несвязанные параметры.
+Correction 2 — ФИНАЛЬНЫЕ ПРАВКИ: валидация чисел math.isfinite (23)
+  reference_price: NaN / +Inf (регрессия: прежде проходил) / -Inf / ноль / отрицательное
+      test_reference_price_nan_rejected, test_reference_price_plus_inf_rejected,
+      test_reference_price_minus_inf_rejected, test_reference_price_zero_rejected,
+      test_reference_price_negative_rejected
+  execution_price: те же 5 случаев
+      test_execution_price_nan_rejected, test_execution_price_plus_inf_rejected,
+      test_execution_price_minus_inf_rejected, test_execution_price_zero_rejected,
+      test_execution_price_negative_rejected
+  contract_multiplier: те же 5 случаев
+      test_contract_multiplier_nan_rejected, test_contract_multiplier_plus_inf_rejected,
+      test_contract_multiplier_minus_inf_rejected, test_contract_multiplier_zero_rejected,
+      test_contract_multiplier_negative_rejected
+  quantity: ноль / отрицательное / bool / не-int float / NaN float / Inf float /
+            переполнение int (не представим конечным float)
+      test_quantity_zero_rejected, test_quantity_negative_rejected,
+      test_quantity_bool_rejected, test_quantity_float_non_integer_rejected,
+      test_quantity_nan_float_rejected, test_quantity_inf_float_rejected,
+      test_quantity_overflow_int_rejected
+  валидные конечные значения: формулы НЕ изменены
+      test_finite_valid_arguments_produce_unchanged_formulas
 
 ЗАРЕГРЕССИОННЫЕ СЦЕНАРИИ, ПРИХВАТЁННЫЕ ДОПОЛНИТЕЛЬНО
-  Все 80 тестов Stage E (data feed / execution / ledger / report /
-  decisions / integration) проходят без изменений и без правок
-  ожиданий; Stage A–D не изменялись (см. NO_CHANGES_ABCD_PROOF).
+  Все 158 тестов Stage E/E.1 проходят; Stage A–D — 799 passed без
+  изменений и без правок ожиданий (см. NO_CHANGES_ABCD_PROOF).
+  12 обязательных сценариев §3.5, 12 обязательных §4.5 и 7 обязательных
+  §5.3 первоначального ТЗ E.1 продолжают проходить (46 тестов раунда 1
+  входят в 158; их ожидания не менялись).
 
-ВЕРДИКТ: 1176 passed in 13.64s / 1696 passed in 24.73s — все требования регрессии ТЗ §6 выполнены.
+ВЕРДИКТ: 1208 passed in 14.61s / 1728 passed in 26.29s — все требования регрессии финальных
+правок выполнены; поставка остаётся FINAL без дополнительных версий/папок.

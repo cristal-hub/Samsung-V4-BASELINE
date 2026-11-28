@@ -1,9 +1,10 @@
 # SAMSUNG V4 — STAGE E.1 — HISTORICAL ENGINE CORRECTIONS
 
 Этап корректировки и укрепления Stage E: три архитектурных исправления
-исторического симулятора. Существующая архитектура Stage E сохранена;
-Stage A–D не изменены; стратегия и её пороги не тронуты; никакой
-оптимизации параметров.
+исторического симулятора + ФИНАЛЬНЫЕ ПРАВКИ (два небольших исправления
+существующей поставки E.1, без новой версии/папки). Существующая
+архитектура Stage E сохранена; Stage A–D не изменены; стратегия и её
+пороги не тронуты; никакой оптимизации параметров.
 
 РЕЖИМ: READ-ONLY / RESEARCH ONLY / VIRTUAL EXECUTION ONLY.
 Только исторические данные и виртуальная симуляция. Нет брокерских SDK,
@@ -25,14 +26,14 @@ Samsung_V4_STAGE_E1/
 ├── STAGE_E1_PYTEST_CANONICAL_LOG.txt         ← канонический лог pytest
 └── candidate/
     ├── historical_engine/                    ← полный исправленный пакет (11 файлов)
-    │   ├── __init__.py        (M)  экспорты Stage E.1
-    │   ├── models.py          (M)  GapIncident, EngineConfig.calendar, константы
-    │   ├── calendar.py        (A)  TradingCalendar (Correction №1)
-    │   ├── data_feed.py       (M)  календарно-корректный контроль пропусков
-    │   ├── execution.py       (M)  раздельный учёт slippage/improvement (№2)
-    │   ├── ledger.py          (M)  improvement-поля, total_execution_cost
-    │   ├── report.py          (M)  costs/gap_verification/metadata
-    │   ├── engine.py          (M)  согласованность конфигураций (№3)
+    │   ├── __init__.py        (M@E.1)  экспорты Stage E.1
+    │   ├── models.py          (M@E.1)  GapIncident, EngineConfig.calendar, константы
+    │   ├── calendar.py        (A@E.1, M@финал)  TradingCalendar (Correction №1)
+    │   ├── data_feed.py       (M@E.1, M@финал)  контроль пропусков + документация покрытия всей серии
+    │   ├── execution.py       (M@E.1, M@финал)  раздельный учёт slippage/improvement (№2) + валидация чисел
+    │   ├── ledger.py          (M@E.1)  improvement-поля, total_execution_cost
+    │   ├── report.py          (M@E.1)  costs/gap_verification/metadata
+    │   ├── engine.py          (M@E.1)  согласованность конфигураций (№3)
     │   ├── risk_integration.py     (без изменений, Stage D интеграция)
     │   ├── strategy_runner.py      (без изменений)
     │   └── event_engine.py         (без изменений)
@@ -43,12 +44,15 @@ Samsung_V4_STAGE_E1/
         ├── test_stage_e_execution_ledger.py    (без изменений)
         ├── test_stage_e_integration.py         (без изменений)
         ├── test_stage_e_report.py              (без изменений)
-        ├── test_stage_e1_calendar.py           (A)  19 тестов
-        ├── test_stage_e1_slippage.py           (A)  16 тестов
-        └── test_stage_e1_config_consistency.py (A)  11 тестов
+        ├── test_stage_e1_calendar.py           (A@E.1, M@финал)  28 тестов
+        ├── test_stage_e1_slippage.py           (A@E.1, M@финал)  39 тестов
+        └── test_stage_e1_config_consistency.py (A@E.1)  11 тестов
 ```
 
-(A) — новый файл, (M) — изменён относительно принятого Stage E.
+(A) — новый файл, (M) — изменён; @E.1 — раунд 1 (первоначальная поставка
+E.1 относительно принятого Stage E), @финал — ФИНАЛЬНЫЕ ПРАВКИ
+(раунд 2 относительно первоначальной поставки E.1: изменено 5 файлов,
+добавлено 0, удалено 0 — см. STAGE_E1_CHANGED_AND_NEW_FILES.txt).
 Все прочие файлы дерева candidate совпадают байт-в-байт с Stage E
 (179 файлов проверено, 0 нарушений — см. NO_CHANGES_ABCD_PROOF).
 
@@ -60,11 +64,18 @@ Samsung_V4_STAGE_E1/
    праздник (C), невозможность проверки (D). STRICT отклоняет только
    подтверждённые пропуски; отсутствие календаря ЯВНО помечается как
    ограниченная проверка (без ложного подтверждения полноты).
+   **Финальные правки:** покрытие календарём проверяется для ВСЕЙ серии
+   независимо от наличия отклонений — начало и конец серии проверяются
+   ОТДЕЛЬНО; статус FULL только при действительном покрытии всей серии.
 2. **Раздельный учёт slippage** — неблагоприятное проскальзывание (>= 0)
    и улучшение цены (>= 0) разделены по направлению сделки; прежняя
    отрицательная запись «slippage» на TP после гэпа устранена;
    `total_execution_cost = total_commission + total_adverse_slippage_cost`
    (документировано); комиссия отдельна; цена исполнения НЕ изменена.
+   **Финальные правки:** конечность ВСЕХ числовых аргументов
+   `split_execution_deviation` проверяется через `math.isfinite()`
+   (NaN / ±Infinity / нули / отрицательные отклоняются fail-closed;
+   прежде +Infinity проходил проверку знаком).
 3. **Согласованность конфигураций** — `BacktestEngine` fail-closed
    проверяет совместимость с конфигурацией фида: интервал, gap_policy,
    календарь (включая представление часового пояса); диагностика
@@ -78,8 +89,8 @@ Samsung_V4_STAGE_E1/
 
 ```bash
 cd <repo-root>/candidate
-python -m pytest tests -q            # канонический: 1176 passed
-python -m pytest -q                  # полный:      1696 passed
+python -m pytest tests -q            # канонический: 1208 passed
+python -m pytest -q                  # полный:      1728 passed
 ```
 
 ## Критерии приёмки E.1 — статус
@@ -97,3 +108,19 @@ python -m pytest -q                  # полный:      1696 passed
 * [x] все тесты Stage A–D проходят (1570/1570, файлы байт-в-байт те же)
 * [x] нет изменений Stage A–D (179 файлов, 0 нарушений)
 * [x] нет Broker SDK / сетевых запросов / LIVE ордеров / реальных денег
+
+## Критерии приёмки ФИНАЛЬНЫХ ПРАВОК — статус
+
+* [x] покрытие календаря проверяется для всей серии, независимо от
+      наличия обнаруженных пропусков (начало и конец — отдельно)
+* [x] при любой части серии вне покрытия статус НЕ FULL
+      (PERFORMED_PARTIAL_CALENDAR_COVERAGE_INSUFFICIENT)
+* [x] непокрытые даты не считаются выходными или праздниками
+* [x] STRICT не отклоняет неподтверждённые инциденты как подтверждённые
+* [x] конечность всех числовых аргументов split_execution_deviation
+      через math.isfinite: NaN / ±Infinity / нули / отрицательные
+      отклоняются (отдельный тест на каждый случай, 23 теста)
+* [x] формулы adverse slippage и favorable price improvement НЕ изменены
+* [x] все прежние тесты Stage E/E.1 проходят (158/158, ожидания
+      первоначальной поставки не менялись)
+* [x] no-test-loss: 1696 -> 1728, потеряно 0

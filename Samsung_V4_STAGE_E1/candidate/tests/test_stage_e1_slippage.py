@@ -3,7 +3,9 @@
 # Correction №2 — раздельный учёт проскальзывания и улучшения цены.
 #
 # 12 обязательных сценариев ТЗ E.1 §4.5 + дополнительные проверки
-# обратной совместимости полей отчёта и детерминизма.
+# обратной совместимости полей отчёта и детерминизма + FINAL CORRECTIONS
+# (валидация конечности всех числовых аргументов split_execution_deviation
+# через math.isfinite: NaN / ±Infinity / нули / отрицательные отклоняются).
 # Только исторические синтетические данные, только оффлайн.
 
 from __future__ import annotations
@@ -466,3 +468,165 @@ def test_signed_deviation_identity_adverse_minus_improvement():
     assert op["slippage_cost"] == \
         quantity * 1.0 * (exec_price - 100.0)
     assert op["price_improvement"] == 0.0
+
+
+# --- FINAL CORRECTIONS (Correction 2): валидация чисел (math.isfinite) --------
+#
+# Требование: конечность ВСЕХ числовых аргументов split_execution_deviation()
+# проверяется через math.isfinite(); отклоняются NaN, +Infinity, -Infinity,
+# нулевые и отрицательные значения там, где они недопустимы. Регрессионная
+# основа: прежде +Infinity ПРОХОДИЛ проверку знаком (inf > 0) и заражал
+# показатели Inf/NaN; NaN ловился сравнением x != x, Inf — нет.
+# Формулы adverse slippage и favorable price improvement НЕ изменены.
+
+
+def _split(**overrides):
+    """Вызов split_execution_deviation со стандартными валидными
+    аргументами; overrides замещают отдельные значения."""
+    kwargs = dict(side=SIDE_BUY, reference_price=100.0,
+                  execution_price=100.5, quantity=10,
+                  contract_multiplier=1.0)
+    kwargs.update(overrides)
+    return split_execution_deviation(**kwargs)
+
+
+# reference_price: NaN / +Inf / -Inf / ноль / отрицательное --------------------
+
+def test_reference_price_nan_rejected():
+    with pytest.raises(ExecutionError):
+        _split(reference_price=float("nan"))
+
+
+def test_reference_price_plus_inf_rejected():
+    # Регрессия FINAL CORRECTIONS: прежде +Infinity проходил валидацию.
+    with pytest.raises(ExecutionError):
+        _split(reference_price=float("inf"))
+
+
+def test_reference_price_minus_inf_rejected():
+    with pytest.raises(ExecutionError):
+        _split(reference_price=float("-inf"))
+
+
+def test_reference_price_zero_rejected():
+    with pytest.raises(ExecutionError):
+        _split(reference_price=0.0)
+
+
+def test_reference_price_negative_rejected():
+    with pytest.raises(ExecutionError):
+        _split(reference_price=-100.0)
+
+
+# execution_price: NaN / +Inf / -Inf / ноль / отрицательное --------------------
+
+def test_execution_price_nan_rejected():
+    with pytest.raises(ExecutionError):
+        _split(execution_price=float("nan"))
+
+
+def test_execution_price_plus_inf_rejected():
+    with pytest.raises(ExecutionError):
+        _split(execution_price=float("inf"))
+
+
+def test_execution_price_minus_inf_rejected():
+    with pytest.raises(ExecutionError):
+        _split(execution_price=float("-inf"))
+
+
+def test_execution_price_zero_rejected():
+    with pytest.raises(ExecutionError):
+        _split(execution_price=0.0)
+
+
+def test_execution_price_negative_rejected():
+    with pytest.raises(ExecutionError):
+        _split(execution_price=-100.5)
+
+
+# contract_multiplier: NaN / +Inf / -Inf / ноль / отрицательное ----------------
+
+def test_contract_multiplier_nan_rejected():
+    with pytest.raises(ExecutionError):
+        _split(contract_multiplier=float("nan"))
+
+
+def test_contract_multiplier_plus_inf_rejected():
+    with pytest.raises(ExecutionError):
+        _split(contract_multiplier=float("inf"))
+
+
+def test_contract_multiplier_minus_inf_rejected():
+    with pytest.raises(ExecutionError):
+        _split(contract_multiplier=float("-inf"))
+
+
+def test_contract_multiplier_zero_rejected():
+    with pytest.raises(ExecutionError):
+        _split(contract_multiplier=0.0)
+
+
+def test_contract_multiplier_negative_rejected():
+    with pytest.raises(ExecutionError):
+        _split(contract_multiplier=-1.0)
+
+
+# quantity: ноль / отрицательное / bool / не-int / NaN/Inf float / переполнение
+
+def test_quantity_zero_rejected():
+    with pytest.raises(ExecutionError):
+        _split(quantity=0)
+
+
+def test_quantity_negative_rejected():
+    with pytest.raises(ExecutionError):
+        _split(quantity=-10)
+
+
+def test_quantity_bool_rejected():
+    with pytest.raises(ExecutionError):
+        _split(quantity=True)
+
+
+def test_quantity_float_non_integer_rejected():
+    with pytest.raises(ExecutionError):
+        _split(quantity=10.5)
+
+
+def test_quantity_nan_float_rejected():
+    with pytest.raises(ExecutionError):
+        _split(quantity=float("nan"))
+
+
+def test_quantity_inf_float_rejected():
+    with pytest.raises(ExecutionError):
+        _split(quantity=float("inf"))
+
+
+def test_quantity_overflow_int_rejected():
+    # Целое, не представимое конечным float: math.isfinite() невозможен,
+    # fail-closed -> ExecutionError (а не OverflowError наружу).
+    with pytest.raises(ExecutionError):
+        _split(quantity=10 ** 400)
+
+
+# Валидные конечные значения: формулы НЕ изменены -------------------------------
+
+def test_finite_valid_arguments_produce_unchanged_formulas():
+    # Порядок float-операций сохранён: quantity * multiplier * delta.
+    assert _split(side=SIDE_BUY, reference_price=100.0,
+                  execution_price=100.5, quantity=10,
+                  contract_multiplier=2.0) == (10 * 2.0 * 0.5, 0.0)
+    # Зеркальность: та же дельта для продажи — улучшение цены.
+    assert _split(side=SIDE_SELL, reference_price=100.0,
+                  execution_price=100.5, quantity=10,
+                  contract_multiplier=2.0) == (0.0, 10 * 2.0 * 0.5)
+    # Точное совпадение цен — обе величины нулевые.
+    assert _split(side=SIDE_BUY, reference_price=100.0,
+                  execution_price=100.0, quantity=3,
+                  contract_multiplier=1.5) == (0.0, 0.0)
+    # Целые цены (int) допускаются, как и прежде.
+    assert _split(side=SIDE_SELL, reference_price=100,
+                  execution_price=99, quantity=2,
+                  contract_multiplier=1) == (2.0, 0.0)

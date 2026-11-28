@@ -3,7 +3,9 @@
 # Correction №1 — календарно-корректное обнаружение пропусков свечей.
 #
 # 12 обязательных сценариев ТЗ E.1 §3.5 + дополнительные проверки
-# детерминизма и fail-closed валидации календаря.
+# детерминизма и fail-closed валидации календаря + FINAL CORRECTIONS
+# (покрытие ВСЕЙ серии: начало/конец серии проверяются отдельно, статус
+# FULL только при действительном покрытии всей серии).
 # Только исторические синтетические данные, только оффлайн; никаких
 # сетевых запросов и брокерских API для получения календаря.
 
@@ -372,6 +374,230 @@ def test_outside_coverage_moment_is_unclassified():
     calendar = make_calendar([8])
     assert calendar.classify_moment(_dt(20, 10)) == \
         MOMENT_CATEGORY_OUTSIDE_CALENDAR_COVERAGE
+
+
+# --- FINAL CORRECTIONS (Correction 1): покрытие ВСЕЙ серии --------------------
+#
+# Дефект: analyze_series() классифицировал ТОЛЬКО ожидаемые метки МЕЖДУ
+# соседними свечами. Серия, все пары которой лежали ровно через интервал,
+# получала статус PERFORMED_FULL_CALENDAR_VERIFIED даже при датах ВНЕ
+# покрытия календаря: граничные свечи (первая и последняя) не входят ни в
+# один межсвечный интервал и прежде не классифицировались вовсе.
+# Исправление: начало и конец серии проверяются ОТДЕЛЬНО и НЕЗАВИСИМО от
+# наличия отклонений; непокрытая граница даёт инцидент категории D
+# (UNVERIFIED_OUTSIDE_CALENDAR_COVERAGE), статус — PARTIAL; STRICT не
+# отклоняет неподтверждённые инциденты; непокрытые даты НЕ считаются
+# выходными или праздниками.
+
+
+def hourly_span(start_day: int, start_hour: int, end_day: int, end_hour: int,
+                price: float = 100.0):
+    """Непрерывные часовые свечи от start_day:start_hour до
+    end_day:end_hour включительно (все межсвечные интервалы РОВНО 1 час —
+    попарная проверка отклонений не находит ничего)."""
+    moments = []
+    current = datetime(2024, 1, start_day, start_hour, tzinfo=MSK)
+    final = datetime(2024, 1, end_day, end_hour, tzinfo=MSK)
+    while current <= final:
+        moments.append(current)
+        current += timedelta(hours=1)
+    half = price * 0.001
+    return [Candle(timestamp=m, open=price, high=price + half,
+                   low=price - half, close=price, volume=1000.0)
+            for m in moments]
+
+
+def make_two_day_calendar():
+    return make_calendar([11, 12])
+
+
+def boundary_incidents(feed):
+    return [i for i in feed.gap_incidents
+            if i.details.get("reason")
+            == "series_boundary_outside_calendar_coverage"]
+
+
+def unverified_incidents(feed):
+    return [i for i in feed.gap_incidents
+            if i.category
+            == GAP_CATEGORY_UNVERIFIED_OUTSIDE_CALENDAR_COVERAGE]
+
+
+# 1. Вся серия находится вне календарного покрытия ------------------------------
+
+def test_series_entirely_outside_calendar_coverage_reports_partial():
+    calendar = make_two_day_calendar()          # покрытие: 11–12.01
+    candles = hourly_span(15, 10, 16, 18)       # серия: 15–16.01 (вне покрытия)
+    feed = make_feed(candles, make_config(calendar))
+    assert confirmed_incidents(feed) == []
+    assert feed.gap_verification_status == GAP_VERIFICATION_PARTIAL
+    # Обе границы вне покрытия; серия НЕПРЕРЫВНА (все 33 пары ровно 1 час,
+    # включая ночные метки) — попарные отклонения отсутствуют, поэтому до
+    # исправления инцидентов не было вовсе и статус ошибочно был FULL.
+    boundaries = {i.details["series_boundary"] for i in boundary_incidents(feed)}
+    assert boundaries == {"series_start", "series_end"}
+    assert len(unverified_incidents(feed)) == 2     # только 2 границы
+    # Непокрытые даты НЕ считаются выходными или праздниками: ни одного
+    # инцидента категорий B/C на непокрытых датах нет.
+    assert all(i.details.get("reason")
+               == "series_boundary_outside_calendar_coverage"
+               for i in feed.gap_incidents)
+
+
+# 2. Начало серии вне покрытия ----------------------------------------------------
+
+def test_series_start_outside_coverage_reports_partial():
+    # Календарь покрывает 11–12.01; серия начинается 10.01 23:00 и идёт
+    # БЕЗ ПРОПУСКОВ (все пары ровно 1 час) до 11.01 18:00. Прежде: ни
+    # одного попарного отклонения -> ложный статус FULL. Теперь: начало
+    # серии (10.01) вне покрытия -> граница даёт инцидент категории D.
+    calendar = make_two_day_calendar()
+    candles = hourly_span(10, 23, 11, 18)
+    feed = make_feed(candles, make_config(calendar))
+    assert confirmed_incidents(feed) == []
+    assert feed.gaps == ()
+    assert feed.gap_verification_status == GAP_VERIFICATION_PARTIAL
+    bounds = boundary_incidents(feed)
+    assert len(bounds) == 1
+    assert bounds[0].details["series_boundary"] == "series_start"
+    assert bounds[0].expected_timestamp_iso == _dt(10, 23).isoformat()
+    assert bounds[0].details["calendar_coverage_start_date"] == "2024-01-11"
+
+
+# 3. Конец серии вне покрытия ------------------------------------------------------
+
+def test_series_end_outside_coverage_reports_partial():
+    # Серия 11–12.01 внутри покрытия, но продолжается без пропусков на
+    # 13.01 00:00–02:00 (вне покрытия). Межсвечные окна 12.01 дают только
+    # нормальные NON_TRADING_TIME-инциденты (даты покрыты), поэтому прежде
+    # неподтверждённых инцидентов не было и статус ошибочно был FULL.
+    calendar = make_two_day_calendar()
+    candles = (hourly_span(11, 10, 12, 18) + hourly_span(13, 0, 13, 2))
+    feed = make_feed(candles, make_config(calendar))
+    assert confirmed_incidents(feed) == []
+    assert feed.gap_verification_status == GAP_VERIFICATION_PARTIAL
+    bounds = boundary_incidents(feed)
+    assert len(bounds) == 1
+    assert bounds[0].details["series_boundary"] == "series_end"
+    # Граница серии — ПОСЛЕДНЯЯ свеча (13.01 02:00).
+    assert bounds[0].expected_timestamp_iso == _dt(13, 2).isoformat()
+    assert bounds[0].details["calendar_coverage_end_date"] == "2024-01-12"
+
+
+# 4. Серия полностью покрыта календарём ----------------------------------------------
+
+def test_series_fully_covered_boundary_check_keeps_full_status():
+    # Полное покрытие — статус FULL СОХРАНЯЕТСЯ: граничная проверка не
+    # даёт ложных срабатываний на полностью покрытой серии.
+    calendar = make_two_day_calendar()
+    candles = hourly_day(11) + hourly_day(12)
+    feed = make_feed(candles, make_config(calendar))
+    assert confirmed_incidents(feed) == []
+    assert feed.gap_verification_status == GAP_VERIFICATION_FULL
+    assert boundary_incidents(feed) == []
+    assert unverified_incidents(feed) == []
+
+
+# 5. Между свечами нет пропусков, но календарь не покрывает даты серии --------
+
+def test_contiguous_series_without_gaps_but_uncovered_dates_is_partial():
+    # КЛЮЧЕВОЙ регрессионный сценарий дефекта: один торговый день целиком
+    # вне покрытия, все межсвечные интервалы РОВНО 1 час — прежде ноль
+    # инцидентов и ложный FULL; теперь ОБЕ границы дают инцидент D.
+    calendar = make_two_day_calendar()
+    candles = hourly_span(15, 10, 15, 18)
+    assert calendar.classify_moment(candles[0].timestamp) == \
+        MOMENT_CATEGORY_OUTSIDE_CALENDAR_COVERAGE
+    feed = make_feed(candles, make_config(calendar))
+    assert confirmed_incidents(feed) == []
+    assert feed.gaps == ()
+    assert feed.gap_verification_status == GAP_VERIFICATION_PARTIAL
+    bounds = boundary_incidents(feed)
+    assert len(bounds) == 2
+    assert {i.details["series_boundary"] for i in bounds} \
+        == {"series_start", "series_end"}
+    assert all(i.gap_seconds == 0 and i.missing_expected_count == 0
+               for i in bounds)
+
+
+# 6. Корректные выходные и перерывы сессий продолжают обрабатываться правильно --
+
+def test_weekends_and_session_breaks_unchanged_after_boundary_check():
+    # Выходные 13–14.01 ВНУТРИ покрытия и внутридневной перерыв 12.01
+    # (свеча 14:00 отсутствует): классификация B/C не изменилась, ложных
+    # границ нет, статус FULL.
+    calendar = make_calendar([12, 15], breaks_for={12: (14, 0, 14, 10)})
+    candles = (hourly_day(12, hours=[10, 11, 12, 13, 15, 16, 17, 18])
+               + hourly_day(15))
+    feed = make_feed(candles, make_config(calendar))
+    assert confirmed_incidents(feed) == []
+    assert feed.gap_verification_status == GAP_VERIFICATION_FULL
+    assert boundary_incidents(feed) == []
+    categories = {i.category for i in feed.gap_incidents}
+    assert GAP_CATEGORY_SESSION_BREAK in categories
+    assert GAP_CATEGORY_NON_TRADING_DAY in categories
+    assert GAP_CATEGORY_UNVERIFIED_OUTSIDE_CALENDAR_COVERAGE not in categories
+
+
+# 7. STRICT не отклоняет неподтверждённые инциденты ----------------------------
+
+def test_strict_does_not_reject_series_outside_coverage():
+    # Непокрытая граница — НЕ подтверждённый пропуск: STRICT собирает фид
+    # без ошибки и честно сообщает ограниченную проверку (PARTIAL).
+    calendar = make_two_day_calendar()
+    candles = hourly_span(15, 10, 15, 18)
+    feed = make_feed(candles, make_config(calendar, policy="STRICT"))
+    assert feed.gap_verification_status == GAP_VERIFICATION_PARTIAL
+    assert len(boundary_incidents(feed)) == 2
+    assert feed.gaps == ()
+
+
+# 8. Детерминизм граничных инцидентов ------------------------------------------
+
+def test_boundary_coverage_incidents_are_deterministic():
+    calendar = make_two_day_calendar()
+    candles = hourly_span(10, 23, 11, 18)
+    series = CandleSeries(tuple(candles))
+    first = calendar.analyze_series(series, HOUR)
+    second = calendar.analyze_series(series, HOUR)
+    assert first == second
+    boundary = [i for i in first if i.details.get("reason")
+                == "series_boundary_outside_calendar_coverage"]
+    assert len(boundary) == 1
+    assert boundary[0].details == {
+        "reason": "series_boundary_outside_calendar_coverage",
+        "series_boundary": "series_start",
+        "series_boundary_timestamp_iso": _dt(10, 23).isoformat(),
+        "calendar_coverage_start_date": "2024-01-11",
+        "calendar_coverage_end_date": "2024-01-12",
+    }
+
+
+# 9. Статус ограниченной проверки доходит до отчёта прогона ----------------------
+
+def test_report_reflects_partial_status_for_uncovered_series():
+    from historical_engine import BacktestEngine
+    strategy = AlwaysBuyStrategy()
+    config = make_strategy_config(strategy, {"warmup": 1})
+    calendar = make_two_day_calendar()
+    candles = hourly_span(15, 10, 15, 18)
+    engine_config = make_config(calendar)
+    feed = make_feed(candles, engine_config)
+    engine = BacktestEngine(strategy=strategy, strategy_config=config,
+                            engine_config=engine_config, feed=feed)
+    report = engine.run_full()
+    gv = report["gap_verification"]
+    assert gv["status"] == GAP_VERIFICATION_PARTIAL
+    assert gv["calendar_present"] is True
+    counts = gv["incident_counts"]
+    assert counts["unverified_outside_calendar_coverage"] == 2
+    assert counts["confirmed_expected_candle_missing"] == 0
+    # Полная классификация инцидентов содержит обе границы серии.
+    boundary_reasons = [i["details"]["series_boundary"]
+                        for i in report["gap_analysis"]
+                        if i["details"].get("reason")
+                        == "series_boundary_outside_calendar_coverage"]
+    assert sorted(boundary_reasons) == ["series_end", "series_start"]
 
 
 def test_gap_verification_reaches_report():
