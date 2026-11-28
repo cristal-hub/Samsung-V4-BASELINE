@@ -1,3 +1,8 @@
+Команда (из корня candidate/): python -m pytest -v
+(тот же прогон в режиме -q: 1733 passed in 24.39s — см.
+STAGE_E1_TEST_RESULTS.txt). Прогон документальной сверки отчётности
+(код и тесты не изменялись по отношению к раунду 3). Полный лог:
+
 ============================= test session starts ==============================
 platform linux -- Python 3.12.16, pytest-9.0.2, pluggy-1.6.0 -- /home/z/.venv/bin/python3
 cachedir: .pytest_cache
@@ -1742,4 +1747,4 @@ tests/test_trading_flag.py::test_start_trading_error_does_not_raise PASSED [ 99%
 tests/test_trading_flag.py::test_stop_trading_does_not_touch_positions PASSED [ 99%]
 tests/test_trading_flag.py::test_no_flag_blocks_new_entries PASSED       [100%]
 
-============================ 1733 passed in 27.83s =============================
+============================ 1733 passed in 28.18s =============================

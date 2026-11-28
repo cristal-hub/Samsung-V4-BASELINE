@@ -21,14 +21,106 @@ STAGE E.1 (РАУНД 3: ЗАЩИТА ОТ ЧИСЛОВОГО ПЕРЕПОЛНЕ
                           ПОСЛЕ  1733 passed in 26.54s
   verbose-итог полного:  ============================ 1733 passed in 27.83s =============================
 
-  Отдельные группы (ПОСЛЕ):
-    новый файл test_stage_e1_slippage.py целиком:  44 passed in 0.46s
-    новый файл test_stage_e1_calendar.py целиком:  28 passed in 0.46s
-    все тесты Stage E + Stage E.1:  163 passed in 3.72s
-    все тесты Stage A–D:            799 passed in 6.56s
-
   Дельта: full 1728 -> 1733 (+5), canonical 1208 -> 1213 (+5).
   0 failed, 0 skipped-изменений, 0 удалённых/ослабленных тестов.
+
+ОТДЕЛЬНЫЕ ГРУППЫ — точные команды и результаты (свежая сверка
+«раунда 4 — документальная сверка отчётности»: только прогоны и
+документы, программный код и тесты НЕ изменялись; все группы —
+0 failed, 0 skipped)
+
+  1. Новый файл test_stage_e1_slippage.py целиком (44 теста):
+       python -m pytest tests/test_stage_e1_slippage.py -q
+       -> 44 passed in 0.41s
+
+  2. Новый файл test_stage_e1_calendar.py целиком (28 тестов):
+       python -m pytest tests/test_stage_e1_calendar.py -q
+       -> 28 passed in 0.40s
+
+  3. Новый файл test_stage_e1_config_consistency.py целиком (11 тестов):
+       python -m pytest tests/test_stage_e1_config_consistency.py -q
+       -> 11 passed in 0.38s
+
+  4. Все тесты Stage E + Stage E.1 — 8 файлов test_stage_e*/test_stage_e1*
+     в tests/ (узкая группа «исторический движок», 163 теста):
+       python -m pytest tests/test_stage_e_data_feed.py \
+                        tests/test_stage_e_engine_decisions.py \
+                        tests/test_stage_e_execution_ledger.py \
+                        tests/test_stage_e_integration.py \
+                        tests/test_stage_e_report.py \
+                        tests/test_stage_e1_calendar.py \
+                        tests/test_stage_e1_slippage.py \
+                        tests/test_stage_e1_config_consistency.py -q
+       -> 163 passed in 3.94s
+
+  5. Тесты Stage A–D, УЗКОЕ ОПРЕДЕЛЕНИЕ — только 15 файлов
+     test_stage_*, добавленных в tests/ этапами A–D (799 тестов):
+       python -m pytest tests/test_stage_a_attribution.py \
+                        tests/test_stage_a_engine_config.py \
+                        tests/test_stage_a_legacy_adapter.py \
+                        tests/test_stage_a_legacy_profiles.py \
+                        tests/test_stage_a_schema.py \
+                        tests/test_stage_a_strategy_api.py \
+                        tests/test_stage_a1_attribution_explicit.py \
+                        tests/test_stage_a1_config_immutability.py \
+                        tests/test_stage_a2_config_hash_integrity.py \
+                        tests/test_stage_a2_1_context_integrity.py \
+                        tests/test_stage_b_state_isolation.py \
+                        tests/test_stage_b1_state_key_and_concurrency.py \
+                        tests/test_stage_c_contracts.py \
+                        tests/test_stage_c_exit_service.py \
+                        tests/test_stage_d_strategy_risk.py -q
+       -> 799 passed in 6.38s
+       Состав 799 по этапам:
+         Stage A      (6 файлов): 128
+         Stage A.1    (2 файла):   81
+         Stage A.2    (1 файл):    57
+         Stage A.2.1  (1 файл):    76
+         Stage B      (1 файл):   115
+         Stage B.1    (1 файл):    33
+         Stage C      (2 файла):  130
+         Stage D      (1 файл):   179
+                       ИТОГО      799
+
+  6. Все тесты ВНЕ исторического движка — Stage A–D в ШИРОКОМ
+     определении: полное дерево без 8 файлов Stage E/E.1 (1570 тестов):
+       python -m pytest \
+         --ignore=tests/test_stage_e_data_feed.py \
+         --ignore=tests/test_stage_e_engine_decisions.py \
+         --ignore=tests/test_stage_e_execution_ledger.py \
+         --ignore=tests/test_stage_e_integration.py \
+         --ignore=tests/test_stage_e_report.py \
+         --ignore=tests/test_stage_e1_calendar.py \
+         --ignore=tests/test_stage_e1_slippage.py \
+         --ignore=tests/test_stage_e1_config_consistency.py -q
+       -> 1570 passed in 23.54s
+
+РАЗЪЯСНЕНИЕ СЧЁТЧИКОВ (799 vs 1570)
+  В сопроводительной отчётности фигурировали два счётчика под близкими
+  названиями «Stage A–D». Оба верны, но измеряют РАЗНЫЕ группы:
+
+  * 799 — УЗКОЕ определение: только тесты в 15 файлах test_stage_*,
+    добавленных в tests/ самими этапами A–D (см. группу 5).
+    НЕ включает исходные тесты репозитория.
+
+  * 1570 — ШИРОКОЕ определение: ВСЕ тесты дерева candidate, кроме
+    8 файлов Stage E/E.1 (см. группу 6). Это полный прогон всего,
+    что существовало ДО Stage E: тот же счётчик давал штатный полный
+    pytest на конец этапа D.1 (1570 passed — лог stage_d1_after_full.log).
+    Этапы E/E.1 только ДОБАВЛЯЛИ новые файлы тестов и не трогали
+    существовавшие, поэтому на дереве E.1 широкий счётчик совпадает
+    с итогом этапа D.1.
+
+  * Тождества (все проверены свежими прогонами выше):
+      1733 (полный) = 1570 + 163 (Stage E/E.1)
+      1570 = 520 (исходные тесты репозитория в корне candidate,
+                  candidate/test_*.py — «root»)
+             + 251 (20 исходных файлов репозитория, продублированных
+                  в tests/)
+             + 799 (15 файлов этапов A–D)
+      1213 (канонический tests/) = 251 + 799 + 163
+    Разница 1570 − 799 = 771 = 520 + 251 — исходные тесты репозитория,
+    не относящиеся к файлам, добавленным этапами A–D.
 
 NO-TEST-LOSS (сравнение ID тестов ДО/ПОСЛЕ, нормализованные ID с учётом
 каталога tests/ vs корень; stage_e1g_no_test_loss_check.txt)
@@ -58,7 +150,8 @@ NO-TEST-LOSS (сравнение ID тестов ДО/ПОСЛЕ, нормали
 
 ЗАРЕГРЕССИОННЫЕ СЦЕНАРИИ, ПРИХВАТЁННЫЕ ДОПОЛНИТЕЛЬНО
   Все 163 теста Stage E/E.1 проходят (158 прежних + 5 новых); их
-  прежние ожидания не менялись. Stage A–D — 799 passed in 6.56s без изменений
+  прежние ожидания не менялись. Тесты этапов A–D (799 в 15 файлах)
+  и все тесты вне исторического движка (1570) проходят без изменений
   и без правок ожиданий (см. NO_CHANGES_ABCD_PROOF: 179 файлов, 0
   нарушений). 12 обязательных сценариев §3.5, 12 обязательных §4.5 и
   7 обязательных §5.3 первоначального ТЗ E.1 продолжают проходить.
@@ -68,3 +161,7 @@ NO-TEST-LOSS (сравнение ID тестов ДО/ПОСЛЕ, нормали
 
 ВЕРДИКТ: 1213 passed in 14.53s / 1733 passed in 26.54s — все требования регрессии раунда 3
 выполнены; поставка остаётся FINAL без дополнительных версий/папок.
+Свежая сверка раунда 4 (только отчётность, код и тесты не изменялись):
+1213 passed in 13.34s / 1733 passed in 24.39s (verbose: 1733 passed in
+28.18s); группы 163 / 799 / 1570 — см. «Отдельные группы»; 0 failed,
+0 skipped, 0 ошибок сбора.

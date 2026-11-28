@@ -105,6 +105,52 @@ python -m pytest tests -q            # канонический: 1213 passed
 python -m pytest -q                  # полный:      1733 passed
 ```
 
+Отдельные группы (тоже из корня candidate):
+
+```bash
+# Stage E + E.1 — 8 файлов test_stage_e*/test_stage_e1* в tests/:
+#   163 passed
+python -m pytest \
+  tests/test_stage_e_data_feed.py tests/test_stage_e_engine_decisions.py \
+  tests/test_stage_e_execution_ledger.py tests/test_stage_e_integration.py \
+  tests/test_stage_e_report.py tests/test_stage_e1_calendar.py \
+  tests/test_stage_e1_slippage.py tests/test_stage_e1_config_consistency.py -q
+
+# Stage A–D в ШИРОКОМ смысле — всё дерево без 8 файлов Stage E/E.1
+# (всё, что существовало до Stage E; совпадает с полным pytest конца
+# этапа D.1): 1570 passed
+python -m pytest \
+  --ignore=tests/test_stage_e_data_feed.py \
+  --ignore=tests/test_stage_e_engine_decisions.py \
+  --ignore=tests/test_stage_e_execution_ledger.py \
+  --ignore=tests/test_stage_e_integration.py \
+  --ignore=tests/test_stage_e_report.py \
+  --ignore=tests/test_stage_e1_calendar.py \
+  --ignore=tests/test_stage_e1_slippage.py \
+  --ignore=tests/test_stage_e1_config_consistency.py -q
+
+# Stage A–D в УЗКОМ смысле — только 15 файлов test_stage_*, добавленных
+# в tests/ этапами A–D (без исходных тестов репозитория): 799 passed
+python -m pytest \
+  tests/test_stage_a_attribution.py tests/test_stage_a_engine_config.py \
+  tests/test_stage_a_legacy_adapter.py tests/test_stage_a_legacy_profiles.py \
+  tests/test_stage_a_schema.py tests/test_stage_a_strategy_api.py \
+  tests/test_stage_a1_attribution_explicit.py \
+  tests/test_stage_a1_config_immutability.py \
+  tests/test_stage_a2_config_hash_integrity.py \
+  tests/test_stage_a2_1_context_integrity.py \
+  tests/test_stage_b_state_isolation.py \
+  tests/test_stage_b1_state_key_and_concurrency.py \
+  tests/test_stage_c_contracts.py tests/test_stage_c_exit_service.py \
+  tests/test_stage_d_strategy_risk.py -q
+```
+
+Счётчики связаны тождествами: 1733 = 1570 + 163;
+1570 = 520 (исходные тесты в корне candidate) + 251 (20 исходных
+файлов репозитория в tests/) + 799 (файлы этапов A–D);
+1213 (tests/) = 251 + 799 + 163. Подробнее — STAGE_E1_TEST_RESULTS.txt,
+раздел «РАЗЪЯСНЕНИЕ СЧЁТЧИКОВ».
+
 ## Критерии приёмки E.1 — статус
 
 * [x] календарные перерывы не считаются пропущенными свечами
@@ -117,7 +163,13 @@ python -m pytest -q                  # полный:      1733 passed
 * [x] PnL и денежный инвариант корректны
 * [x] Feed и Engine проверяют совместимость конфигураций
 * [x] все прежние тесты Stage E проходят (80/80, ожидания не менялись)
-* [x] все тесты Stage A–D проходят (1570/1570, файлы байт-в-байт те же)
+* [x] все тесты Stage A–D проходят (Stage A–D в широком смысле —
+      всё дерево без 8 файлов Stage E/E.1: 1570/1570 = 1733 − 163;
+      совпадает с полным pytest конца этапа D.1; из них 15 файлов
+      test_stage_*, добавленных этапами A–D, дают 799/799 —
+      файлы байт-в-байт те же; состав и команды счётчиков —
+      STAGE_E1_TEST_RESULTS.txt, «Отдельные группы» и
+      «Разъяснение счётчиков»)
 * [x] нет изменений Stage A–D (179 файлов, 0 нарушений)
 * [x] нет Broker SDK / сетевых запросов / LIVE ордеров / реальных денег
 
