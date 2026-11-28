@@ -1,0 +1,196 @@
+================================================================================
+TEST_RESULTS.txt
+SAMSUNG V4 — NEW STRATEGY ENGINE. STAGE A:
+STRATEGY CONTRACTS, CONFIGURATION AND ATTRIBUTION
+Дата прогона: 2026-11-27
+Baseline: commit 884cefd6f12a99f6adc14b5ed4c9eeda21d32e04
+(cristal-hub/Samsung-V4-BASELINE), изолированная копия (git archive)
+Режим: ТОЛЬКО offline — без сети, без брокера, без Sandbox/LIVE-заявок
+================================================================================
+
+1. ОКРУЖЕНИЕ ПРОГОНА (основное, «заявленные зависимости»)
+--------------------------------------------------------------------------------
+Python                3.12.16 (Linux x64)
+pytest                9.0.2
+pytest-asyncio        1.3.0
+pandas                2.2.3
+numpy                 2.1.3
+python-dotenv         1.2.2
+pandas-ta-classic     0.3.15  (удовлетворяет ограничению requirements.txt
+                               «pandas-ta-classic>=0.3.14b»; точная версия
+                               0.3.14b0 в PyPI отсутствует, 0.3.14b1
+                               несовместима с numpy 2.x)
+python-telegram-bot   21.11.1 (ограничение «>=20.0,<22.0»)
+t-tech-investments    1.51.0  — НЕДОСТУПЕН в публичном PyPI; действует штатная
+                               заглушка tests/conftest.py (предусмотрена
+                               авторами baseline для чистых окружений)
+Сетевые обращения тестов: нет. Брокерские подключения: нет.
+Sandbox/LIVE-заявки: нет.
+
+2. ФАКТИЧЕСКОЕ СОСТОЯНИЕ BASELINE (до изменений, измерено)
+--------------------------------------------------------------------------------
+Команда: python -m pytest  (полный набор: корневые test_*.py + tests/)
+Результат (окружение 1): 771 passed, 0 failed (≈21 с, exit code 0)
+
+Команда: python -m pytest tests  (канонический запуск run_tests.ps1)
+Результат (окружение 1): 251 passed, 0 failed
+
+Команда: python -m pytest  в окружении 2 («чистая заглушка», без
+установленного pandas-ta-classic):
+Результат: 753 passed, 18 failed — ИЗВЕСТНЫЕ ОШИБКИ BASELINE этого
+окружения (существуют ДО Stage A; не устраняются Этапом A).
+Полный список 18 (все одной природы: заглушка pandas_ta_classic — пустой
+модуль без adx/atr):
+
+  FAILED test_screener.py::test_screener_returns_top_n
+  FAILED test_screener.py::test_screener_valid_result_less_than_10
+  FAILED test_screener.py::test_screener_filters_low_turnover
+  FAILED test_screener.py::test_screener_cache
+  FAILED test_screener.py::test_screener_partial_scan_returns_none
+  FAILED test_screener.py::test_screener_error_does_not_return_stale_cache
+  FAILED test_strategy.py::test_adx_same_candle_does_not_increase_streak
+  FAILED test_strategy.py::test_adx_flips_after_two_new_candles
+  FAILED test_strategy.py::test_adx_candidate_reversal_resets_streak
+  FAILED tests/test_screener.py::test_screener_returns_top_n
+  FAILED tests/test_screener.py::test_screener_valid_result_less_than_10
+  FAILED tests/test_screener.py::test_screener_filters_low_turnover
+  FAILED tests/test_screener.py::test_screener_cache
+  FAILED tests/test_screener.py::test_screener_partial_scan_returns_none
+  FAILED tests/test_screener.py::test_screener_error_does_not_return_stale_cache
+  FAILED tests/test_strategy.py::test_adx_same_candle_does_not_increase_streak
+  FAILED tests/test_strategy.py::test_adx_flips_after_two_new_candles
+  FAILED tests/test_strategy.py::test_adx_candidate_reversal_resets_streak
+
+Примечание: ранее сообщавшиеся «789 passed» не принимались на веру —
+фактическое число измерено на предоставленном baseline.
+
+3. ТЕСТЫ STAGE A (новые; окружение 1)
+--------------------------------------------------------------------------------
+Итого: 128 passed, 0 failed, 0 skipped
+
+Команда: python -m pytest tests/test_stage_a_strategy_api.py \
+           tests/test_stage_a_engine_config.py tests/test_stage_a_schema.py \
+           tests/test_stage_a_legacy_profiles.py \
+           tests/test_stage_a_legacy_adapter.py \
+           tests/test_stage_a_attribution.py
+
+По файлам:
+  tests/test_stage_a_strategy_api.py     22 passed  — контракт стратегии,
+                                             config_hash (детерминизм,
+                                             порядок ключей, изменение
+                                             параметров, отказ NaN/Inf)
+  tests/test_stage_a_engine_config.py    24 passed  — N-01…N-04, приоритет
+                                             env над JSON, отсутствующее/
+                                             неизвестное ACTIVE_STRATEGY,
+                                             fail-closed битого engine.json,
+                                             UNCONFIGURED поставляемого
+                                             engine.json
+  tests/test_stage_a_schema.py           18 passed  — T-16 (равные/инвертир.
+                                             RSI-пороги), T-17 (валидность
+                                             конфигурации != готовность
+                                             данных), структурные проверки
+  tests/test_stage_a_legacy_profiles.py  11 passed  — G-5 идентичность
+                                             исторических профилей и базовых
+                                             параметров baseline (AST-сверка
+                                             с config.py), FORCE_TRADE не
+                                             перенесён
+  tests/test_stage_a_legacy_adapter.py   31 passed  — G-1 golden signals,
+                                             идентичность моста (адаптер ==
+                                             прямой вызов baseline),
+                                             изоляция baseline-состояния,
+                                             реестр regression-only
+  tests/test_stage_a_attribution.py      22 passed  — атрибуция новых
+                                             объектов, чтение старых записей
+                                             без атрибуции (файл байт-
+                                             неизменен), отсутствие
+                                             фиктивной атрибуции,
+                                             fail-closed без контекста
+
+В окружении 2 (чистые заглушки) тесты G-1/T-17, требующие РЕАЛЬНЫХ
+индикаторов pandas_ta_classic, честно помечаются SKIP с причиной
+(«G-1 требует реальных индикаторов pandas_ta_classic»); остальные тесты
+Stage A проходят без реальных индикаторов. Это НЕ скрытый провал:
+статус SKIP виден в протоколе.
+
+3.1. ЭТАЛОН G-1 (golden signals) — оригинальная логика baseline,
+     воспроизведённая адаптером (tests/fixtures/legacy_golden_signals.json):
+--------------------------------------------------------------------------------
+  A_long_rise_reversal::CONSERVATIVE               HOLD | MA↓, но фильтр MA100 не пройден
+  A_long_rise_reversal::SANDBOX_TEST               SELL | MA(5/13) ↓
+  A_long_rise_reversal::TECH_CHECK                 HOLD | MA↓, но фильтр MA100 не пройден
+  B_rise_dip_reversal::CONSERVATIVE                HOLD | Нет пересечения MA
+  B_rise_dip_reversal::SANDBOX_TEST                BUY  | MA(5/13) ↑
+  B_rise_dip_reversal::TECH_CHECK                  HOLD | Нет пересечения MA
+  C_range_oversold::CONSERVATIVE                   HOLD | Нет сигнала BB+RSI
+  C_range_oversold::SANDBOX_TEST                   HOLD | Нет пересечения MA
+  C_range_oversold::TECH_CHECK                     HOLD | Нет пересечения MA
+  D_short_history::CONSERVATIVE                    HOLD | Недостаточно данных
+  D_short_history::SANDBOX_TEST                    HOLD | Недостаточно данных
+  D_short_history::TECH_CHECK                      HOLD | Недостаточно данных
+  E_incomplete_last::CONSERVATIVE                  HOLD | BB↓ RSI=25.7, фильтр MA100 не пройден
+  E_incomplete_last::SANDBOX_TEST                  HOLD | Нет пересечения MA
+  E_incomplete_last::TECH_CHECK                    HOLD | BB↓ RSI=25.7, фильтр MA100 не пройден
+
+Эталон снимался ДВАЖДЫ независимыми прогонами генератора — совпадение
+байт-в-байт (детерминизм подтверждён). Покрытие: реальный SELL, реальный
+BUY, отклонение тренд-фильтром MA100, ветка BB+RSI (RANGE), недостаток
+данных, обработка незакрытой свечи (drop_incomplete).
+
+3.2. G-5 (идентичность исторических профилей, ключевые проверки):
+--------------------------------------------------------------------------------
+  SANDBOX_TEST  == профиль из baseline config.py  (9 ключей, типы совпадают)
+  TECH_CHECK    == профиль из baseline config.py  (9 ключей, типы совпадают)
+  CONSERVATIVE  == профиль из baseline config.py  (9 ключей, типы совпадают)
+  базовые параметры params.json == базовые присваивания baseline config.py
+  FORCE_TRADE: присутствует в baseline config.py, ОТСУТСТВУЕТ в
+               strategies/legacy_samsung_v4 (запрос профиля -> ValueError)
+
+4. ПОЛНЫЙ REGRESSION SUITE ПОСЛЕ Stage A (сравнение с baseline)
+--------------------------------------------------------------------------------
+Команда: python -m pytest
+Результат: 899 passed, 0 failed (≈21 с, exit code 0)
+
+Команда: python -m pytest tests
+Результат: 379 passed, 0 failed (exit code 0)
+
+Сравнение с baseline:
+  baseline  771 passed / 0 failed  ->  candidate 899 passed / 0 failed
+  дельта: +128 = ТОЛЬКО новые тесты Stage A
+  новых ошибок: 0
+  изменивших исход старых тестов: 0
+  исчезнувших/пропавших тестов baseline: 0
+  новых предупреждений, влияющих на сборку: нет
+
+Дополнительная проверка изоляции: смешанный порядок запуска
+(новые Stage A тесты чередованием с baseline-тестами test_main.py,
+test_persistence.py, test_fail_closed.py) — 105 passed, 0 failed:
+взаимного влияния глобального состояния нет.
+
+5. СВОДКА ПО КРИТЕРИЯМ ТЗ §12
+--------------------------------------------------------------------------------
+  G-1 golden signals ................................. PASS (15 эталонов)
+  G-5 идентичность исторических профилей ............. PASS (11 тестов)
+  T-16 равные RSI-пороги ............................. PASS
+  T-17 валидность конфигурации != готовность данных .. PASS
+  N-01..N-04 проверки конфигурации ................... PASS (24 теста)
+  приоритет ACTIVE_STRATEGY env над JSON ............. PASS
+  отсутствующий ACTIVE_STRATEGY ...................... PASS (UNCONFIGURED)
+  неизвестный ACTIVE_STRATEGY ........................ PASS (CONFIG_ERROR)
+  детерминированность config_hash .................... PASS
+  изменение hash при изменении параметров ............ PASS
+  атрибуция новых объектов ........................... PASS
+  чтение старых записей без атрибуции ................ PASS (байт-неизменно)
+  отсутствие фиктивной атрибуции у старых объектов ... PASS
+  полный regression suite без новых ошибок ........... PASS (899/0)
+
+6. СРЕДА ЗАПУСКА ДЛЯ ВОСПРОИЗВЕДЕНИЯ
+--------------------------------------------------------------------------------
+  cd candidate
+  python -m pytest            # полный набор (899 passed)
+  python -m pytest tests      # канонический поднабор (379 passed)
+  python -m tests.stage_a_golden_tools   # пересборка эталона G-1
+                              # (при СОЗНАТЕЛЬНОЙ смене версии индикаторов)
+
+Все прогоны выполнены offline; никаких реальных сетевых обращений,
+брокерских подключений, Sandbox-заявок и LIVE-заявок не было.
+================================================================================
