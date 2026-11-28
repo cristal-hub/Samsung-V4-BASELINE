@@ -1,0 +1,2271 @@
+diff -ruN a/candidate/strategy_state.py b/candidate/strategy_state.py
+--- a/candidate/strategy_state.py	1970-01-01 00:00:00.000000000 +0000
++++ b/candidate/strategy_state.py	2026-11-27 18:34:49.157815910 +0000
+@@ -0,0 +1,1125 @@
++# strategy_state.py — SAMSUNG V4 — NEW STRATEGY ENGINE. STAGE B.
++#
++# ИЗОЛИРОВАННОЕ СОСТОЯНИЕ СТРАТЕГИИ ПО КЛЮЧУ (strategy_id, FIGI).
++#
++# Назначение (ТЗ Stage B §2):
++#   * состояние стратегии A не влияет на стратегию B;
++#   * состояние инструмента X не влияет на инструмент Y;
++#   * параллельная обработка не приводит к перекрёстному изменению состояния;
++#   * изменение состояния одной пары (strategy_id, FIGI) не меняет другие;
++#   * после перезапуска состояние восстанавливается из сохранённых данных;
++#   * некорректное/несовместимое состояние НЕ приводит к незаметному
++#     продолжению работы с неверными данными (fail-closed).
++#
++# Состав модуля (ТЗ Stage B §3):
++#   * StrategyState         — типизированная неизменяемая модель состояния,
++#                             привязанная к (strategy_id, FIGI, config_hash)
++#                             и к версии схемы состояния;
++#   * StateStore            — хранилище состояния: изоляция по ключу,
++#                             детерминированная сериализация, атомарная
++#                             запись, проверка схемы и ключей, обнаружение
++#                             повреждённых записей, контролируемая ошибка
++#                             при несовпадении config_hash (без автоматиче-
++#                             ского переноса старого состояния);
++#   * StrategyStateManager  — менеджер, выдающий стратегии ТОЛЬКО её
++#                             собственное состояние; создаёт независимое
++#                             состояние при отсутствии записи; не использует
++#                             глобальный mutable context; корректен при
++#                             параллельных обращениях;
++#   * resolve_state_store_path — ЯВНОЕ разрешение пути persistent-хранилища
++#                             из переданной конфигурации; скрытого пути по
++#                             умолчанию НЕ существует (fail-closed).
++#
++# Интеграция с контрактом Stage A (ТЗ Stage B §3.4):
++#   * StrategyConfig принимается ТОЛЬКО точного типа
++#     (type(config) is StrategyConfig — решение Stage A.2.1 задокументировано
++#     в attribution.py и сохраняется здесь);
++#   * config_hash проверяется validate_config_hash_format (Stage A.2);
++#   * AttributionContext принимается ТОЛЬКО проверенный (через
++#     attribution._resolve_context — тот же вход проверки маркера
++#     проверенного создания, что и для factory/stamp/CSV/JSONL; это
++#     УСИЛЕНИЕ проверки, а не обход);
++#   * ActivationMode и торговая логика здесь НЕ используются и не меняются;
++#     legacy_samsung_v4 остаётся REGRESSION_ONLY.
++#
++# Ограничения Stage B (ТЗ §5) соблюдены: торговая логика, параметры,
++# сигналы, риск-менеджмент, исполнение ордеров не затронуты; evaluate_exit
++# (Stage C) не реализован; симулятор/Sandbox adapter не реализованы;
++# подключения к брокеру и заявки отсутствуют; FORCE_TRADE не добавлен;
++# старые файлы Samsung (state.json и др.) не читаются и не записываются.
++#
++# Режим: OFFLINE / READ ONLY DATA / RESEARCH ONLY / NO LIVE ORDERS.
++
++from __future__ import annotations
++
++import json
++import os
++import re
++import tempfile
++import threading
++from dataclasses import dataclass, field, replace as _dataclass_replace
++from datetime import datetime, timezone
++from typing import Any, Callable, List, Mapping, Optional, Tuple
++
++from strategy_api import (
++    ImmutableMapping,
++    StrategyConfig,
++    unfreeze,
++    validate_config_hash_format,
++)
++
++# ---------------------------------------------------------------------------
++# Ошибки (fail-closed; ни одна ситуация не маскируется пустым состоянием)
++# ---------------------------------------------------------------------------
++
++
++class StrategyStateError(Exception):
++    """Базовая ошибка подсистемы состояния стратегии (Stage B)."""
++
++
++class StateValidationError(StrategyStateError):
++    """Семантически невалидные данные состояния/ключей/config_hash."""
++
++
++class StateSchemaError(StrategyStateError):
++    """Неизвестная версия схемы состояния (требуется явное решение)."""
++
++
++class StateCorruptionError(StrategyStateError):
++    """Повреждённая запись состояния (структура/типы/JSON).
++
++    Повреждённые данные НЕ подменяются пустым состоянием незаметно:
++    ошибка пробрасывается вызывающему коду (fail-closed).
++    """
++
++
++class StateConfigMismatchError(StrategyStateError):
++    """Несовпадение config_hash сохранённого состояния и ожидаемого.
++
++    Старое состояние НЕ переносится автоматически на новую конфигурацию:
++    требуется ЯВНОЕ решение владельца (reset_state либо отдельная
++    совместимая обработка). Автоматический сброс запрещён.
++    """
++
++
++class StateAlreadyExistsError(StrategyStateError):
++    """Создание состояния для уже существующей пары (strategy_id, FIGI)."""
++
++
++class StateNotFoundError(StrategyStateError):
++    """save_state для отсутствующей записи: создание — только create_state."""
++
++
++class StateStoreConfigError(StrategyStateError):
++    """Конфигурация хранилища отсутствует/невалидна.
++
++    Отсутствие обязательной явной конфигурации persistent-хранилища
++    НЕ приводит к скрытому переходу на другой путь (fail-closed).
++    """
++
++
++# ---------------------------------------------------------------------------
++# Схема состояния и проверка ключей
++# ---------------------------------------------------------------------------
++
++# Версия схемы состояния. При несовместимых изменениях структуры payload
++# версия увеличивается; старые записи читаются только при ЯВНОЙ реализации
++# совместимости (автоматической миграции нет).
++STATE_SCHEMA_VERSION = 1
++
++# Ключ конфигурации, из которого resolve_state_store_path берёт путь
++# persistent-хранилища. Единственный способ включить persistent-режим —
++# ЯВНО задать этот ключ в переданной конфигурации (в engine.json он может
++# быть добавлен владельцем на этапе интеграции Stage C; здесь engine.json
++# сознательно не изменяется — Stage B не трогает конфигурацию Stage A).
++STATE_STORE_CONFIG_KEY = "STATE_STORE_PATH"
++
++# Допустимое содержимое strategy_id и FIGI. Оба значения попадают в имена
++# файлов persistent-хранилища, поэтому набор символов ограничен безопасным
++# подмножеством ASCII: буквы/цифры/точка/подчёркивание/дефис, первый
++# символ — буква или цифра. Это исключает разделители пути ('/', '\\'),
++# нулевой байт, '..', ведущие точки и любые управляющие символы.
++_KEY_PART_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
++
++_MAX_STRATEGY_ID_LEN = 128
++_MAX_FIGI_LEN = 64
++
++
++def validate_strategy_id(strategy_id: Any) -> str:
++    """Проверяет strategy_id как ключ состояния (fail-closed).
++
++    Пустые значения, не-строки, разделители пути, управляющие символы,
++    '..' и превышение длины отклоняются StateValidationError.
++    """
++    if not isinstance(strategy_id, str) or not strategy_id:
++        raise StateValidationError(
++            "strategy_id состояния должен быть непустой строкой; получено "
++            f"{type(strategy_id).__name__}")
++    if len(strategy_id) > _MAX_STRATEGY_ID_LEN:
++        raise StateValidationError(
++            "strategy_id состояния слишком длинный "
++            f"({len(strategy_id)} > {_MAX_STRATEGY_ID_LEN})")
++    if not _KEY_PART_RE.match(strategy_id):
++        raise StateValidationError(
++            "strategy_id состояния содержит недопустимые символы: "
++            f"{strategy_id!r}; допустимы ASCII-буквы/цифры/точка/"
++            "подчёркивание/дефис, первый символ — буква или цифра "
++            "(защита от обхода изоляции через путь/имя файла)")
++    return strategy_id
++
++
++def validate_figi(figi: Any) -> str:
++    """Проверяет FIGI как ключ состояния (fail-closed).
++
++    Требования те же, что и к strategy_id: непустая строка безопасного
++    набора символов; разделители пути и управляющие символы отклоняются.
++    """
++    if not isinstance(figi, str) or not figi:
++        raise StateValidationError(
++            "figi состояния должен быть непустой строкой; получено "
++            f"{type(figi).__name__}")
++    if len(figi) > _MAX_FIGI_LEN:
++        raise StateValidationError(
++            f"figi состояния слишком длинный ({len(figi)} > {_MAX_FIGI_LEN})")
++    if not _KEY_PART_RE.match(figi):
++        raise StateValidationError(
++            "figi состояния содержит недопустимые символы: "
++            f"{figi!r}; допустимы ASCII-буквы/цифры/точка/подчёркивание/"
++            "дефис, первый символ — буква или цифра (защита от обхода "
++            "изоляции через путь/имя файла)")
++    return figi
++
++
++def _validate_config_hash_of_state(config_hash: Any) -> str:
++    """Проверка config_hash состояния форматом Stage A.2 (SHA-256, 64 hex)."""
++    if not isinstance(config_hash, str) or not config_hash:
++        raise StateValidationError(
++            "config_hash состояния должен быть непустой строкой; получено "
++            f"{type(config_hash).__name__}")
++    try:
++        return validate_config_hash_format(config_hash)
++    except Exception as exc:  # StrategyContractError и подклассы
++        raise StateValidationError(
++            "config_hash состояния не соответствует формату SHA-256 "
++            f"hexdigest: {exc}") from exc
++
++
++# ---------------------------------------------------------------------------
++# Детерминированная сериализация и проверка данных состояния
++# ---------------------------------------------------------------------------
++
++
++def _canonical_json(payload: Mapping[str, Any]) -> str:
++    """Канонический JSON: отсортированные ключи, без пробелов, UTF-8.
++
++    Одна и та же логическая запись всегда даёт побайтово одинаковую
++    строку (детерминированная сериализация, ТЗ Stage B §4.6).
++    """
++    return json.dumps(payload, sort_keys=True, separators=(",", ":"),
++                      ensure_ascii=False, allow_nan=False)
++
++
++def _validate_state_value(value: Any, *, _path: str = "data") -> Any:
++    """Рекурсивная проверка данных состояния на JSON-совместимость.
++
++    Допустимы: None, bool, int, конечный float, str, отображения со
++    строковыми ключами, списки/кортежи, множества (set/frozenset —
++    нормализуются в ОТСОРТИРОВАННЫЙ список для детерминизма).
++    NaN/Infinity отклоняются (та же политика, что и в config_hash
++    Stage A.2); прочие объекты отклоняются StateValidationError.
++
++    Возвращает нормализованное (чисто JSON-типовое) значение.
++    """
++    if value is None or isinstance(value, bool):
++        return value
++    if isinstance(value, int):
++        return value
++    if isinstance(value, float):
++        if value != value or value in (float("inf"), float("-inf")):
++            raise StateValidationError(
++                f"{_path}: NaN/Infinity в данных состояния недопустимы "
++                "(та же политика fail-closed, что и для config_hash; "
++                "такие значения не сериализуются детерминированно)")
++        return value
++    if isinstance(value, str):
++        return value
++    if isinstance(value, Mapping):
++        result: dict = {}
++        for key, item in value.items():
++            if not isinstance(key, str):
++                raise StateValidationError(
++                    f"{_path}: ключи данных состояния должны быть "
++                    f"строками; получен ключ {key!r} "
++                    f"({type(key).__name__})")
++            result[key] = _validate_state_value(
++                item, _path=f"{_path}.{key}")
++        return result
++    if isinstance(value, (list, tuple)):
++        return [
++            _validate_state_value(item, _path=f"{_path}[{i}]")
++            for i, item in enumerate(value)
++        ]
++    if isinstance(value, (set, frozenset)):
++        # Множества не являются JSON-типом: нормализуем в отсортированный
++        # список (детерминированный порядок), элементы — только JSON-скаляры.
++        items = [
++            _validate_state_value(item, _path=f"{_path}{{set}}")
++            for item in value
++        ]
++        items.sort(key=lambda item: _canonical_json(
++            {"v": item}))
++        return items
++    raise StateValidationError(
++        f"{_path}: данные состояния должны быть JSON-совместимыми "
++        f"(None/bool/int/float/str/Mapping/Sequence); получено "
++        f"{type(value).__name__}; произвольные объекты и Enum отклоняются "
++        "(состояние сериализуется детерминированно и восстанавливается "
++        "после перезапуска)")
++
++
++def _normalize_state_data(data: Any) -> dict:
++    """Проверка и нормализация данных состояния ПОЛНОСТЬЮ до заморозки.
++
++    Верхний уровень — обязательно отображение; значения — только
++    JSON-совместимые (см. _validate_state_value). Проверка выполняется
++    ДО построения ImmutableMapping, чтобы ВСЕ проблемы данных состояния
++    давали единообразную StateValidationError (а не внутреннюю ошибку
++    ImmutableMapping) и ни одно значение не отбрасывалось молча.
++    """
++    if not isinstance(data, Mapping):
++        raise StateValidationError(
++            "data состояния должен быть отображением (Mapping); "
++            f"получено {type(data).__name__}")
++    source = unfreeze(data) if isinstance(data, ImmutableMapping) else data
++    normalized = _validate_state_value(source, _path="data")
++    if not isinstance(normalized, dict):
++        raise StateValidationError(
++            "data состояния после нормализации должен быть отображением")
++    return normalized
++
++
++def _utc_now_iso() -> str:
++    """Текущее время UTC в фиксированном формате ISO-8601."""
++    return datetime.now(timezone.utc).isoformat(
++        timespec="microseconds").replace("+00:00", "Z")
++
++
++def _validate_timestamp(value: Any, field_name: str) -> str:
++    """Проверка метки времени состояния (непустая строка ISO-8601 UTC)."""
++    if not isinstance(value, str) or not value:
++        raise StateValidationError(
++            f"{field_name} состояния должен быть непустой строкой "
++            f"ISO-8601; получено {type(value).__name__}")
++    text = value
++    if text.endswith("Z"):
++        text = text[:-1] + "+00:00"
++    try:
++        parsed = datetime.fromisoformat(text)
++    except ValueError as exc:
++        raise StateValidationError(
++            f"{field_name} состояния не читается как ISO-8601: "
++            f"{value!r}") from exc
++    if parsed.tzinfo is None:
++        raise StateValidationError(
++            f"{field_name} состояния должен содержать часовой пояс (UTC): "
++            f"{value!r}")
++    return value
++
++
++# ---------------------------------------------------------------------------
++# Модель состояния стратегии
++# ---------------------------------------------------------------------------
++
++
++@dataclass(frozen=True)
++class StrategyState:
++    """Неизменяемое состояние одной пары (strategy_id, FIGI).
++
++    Гарантии (ТЗ Stage B §3.1):
++      * привязка к strategy_id, FIGI и config_hash — состояние
++        однозначно связано с конфигурацией, для которой оно создано;
++        несоответствие обнаруживается хранилищем/менеджером и не
++        преодолевается автоматически (StateConfigMismatchError);
++      * версия схемы состояния (schema_version) входит в payload и
++        проверяется при десериализации (неизвестная версия —
++        StateSchemaError, требуется явное решение);
++      * типизированные данные: data — глубоко неизменяемое
++        ImmutableMapping поверх проверенных JSON-совместимых значений;
++        изменяемые объекты не сохраняются и наружу не выдаются;
++      * контролируемая сериализация/десериализация: to_payload/to_json
++        детерминированы; from_payload проверяет ВСЁ (структуру, типы,
++        схему, ключи, формат config_hash, метки времени);
++      * отсутствие общих изменяемых объектов между разными ключами:
++        объекты состояния никогда не переиспользуются между ключами;
++        data копируется глубоко при создании (изменение источника после
++        создания не влияет на содержимое состояния).
++
++    Неизменяемость: frozen dataclass + ImmutableMapping (та же природа
++    защиты, что у StrategyConfig Stage A.1); setattr/delattr отклоняются.
++    """
++
++    strategy_id: str
++    figi: str
++    config_hash: str
++    schema_version: int
++    data: ImmutableMapping = field(default_factory=ImmutableMapping)
++    created_at: str = ""
++    updated_at: str = ""
++
++    def __post_init__(self) -> None:
++        # 1. Ключи: безопасный набор символов (изоляция, имена файлов).
++        validate_strategy_id(self.strategy_id)
++        validate_figi(self.figi)
++        # 2. config_hash: формат Stage A.2.
++        _validate_config_hash_of_state(self.config_hash)
++        # 3. Версия схемы: новые объекты создаются ТОЛЬКО текущей версии.
++        #    (Чтение записей других версий идёт через from_payload, где
++        #    несовместимая версия даёт StateSchemaError ДО создания объекта.)
++        if isinstance(self.schema_version, bool) or \
++                not isinstance(self.schema_version, int):
++            raise StateValidationError(
++                "schema_version состояния должен быть целым числом; "
++                f"получено {type(self.schema_version).__name__}")
++        if self.schema_version != STATE_SCHEMA_VERSION:
++            raise StateSchemaError(
++                f"schema_version состояния {self.schema_version!r} не "
++                f"совпадает с текущей схемой {STATE_SCHEMA_VERSION}; "
++                "объект состояния текущей версии не создаётся (fail-closed)")
++        # 4. Данные: верхний уровень — ОБЯЗАТЕЛЬНО отображение (типизированная
++        #    структура состояния); JSON-совместимость + глубокая копия +
++        #    глубокая заморозка. Невалидный верхний уровень отклоняется —
++        #    ничего не отбрасывается молча.
++        object.__setattr__(self, "data",
++                           ImmutableMapping(_normalize_state_data(self.data)))
++        # 5. Метки времени: непустые, ISO-8601, с часовым поясом.
++        _validate_timestamp(self.created_at, "created_at")
++        _validate_timestamp(self.updated_at, "updated_at")
++
++    # --- фабрики ------------------------------------------------------------
++
++    @classmethod
++    def create(cls,
++               strategy_id: Any,
++               figi: Any,
++               config_hash: Any,
++               data: Optional[Mapping[str, Any]] = None,
++               *,
++               now: Optional[str] = None) -> "StrategyState":
++        """Новое состояние для пары (strategy_id, figi) и конфигурации.
++
++        data — стартовые данные (None -> пустое состояние); источник
++        копируется глубоко. now — явно передаваемая метка времени
++        (детерминизм в тестах); по умолчанию — текущее время UTC.
++        """
++        stamp = _validate_timestamp(now, "now") if now is not None \
++            else _utc_now_iso()
++        return cls(
++            strategy_id=strategy_id,
++            figi=figi,
++            config_hash=config_hash,
++            schema_version=STATE_SCHEMA_VERSION,
++            data=ImmutableMapping(
++                _normalize_state_data(data if data is not None else {})),
++            created_at=stamp,
++            updated_at=stamp,
++        )
++
++    def with_data(self,
++                  new_data: Mapping[str, Any],
++                  *,
++                  now: Optional[str] = None) -> "StrategyState":
++        """НОВОЕ состояние с заменёнными данными (прежнее не меняется).
++
++        created_at сохраняется (история создания); updated_at — метка
++        обновления (now или текущее время UTC). Возвращается независимый
++        объект: изменение исходного состояния и источника new_data после
++        вызова не влияет на результат.
++        """
++        stamp = _validate_timestamp(now, "now") if now is not None \
++            else _utc_now_iso()
++        return _dataclass_replace(
++            self,
++            data=ImmutableMapping(_normalize_state_data(new_data or {})),
++            updated_at=stamp,
++        )
++
++    # --- сериализация ---------------------------------------------------------
++
++    def to_payload(self) -> dict:
++        """Модифицируемая JSON-совместимая копия состояния (для хранения).
++
++        Порядок ключей фиксирован структурой словаря; побайтовая
++        детерминированность обеспечивается to_json/_canonical_json.
++        """
++        return {
++            "schema_version": self.schema_version,
++            "strategy_id": self.strategy_id,
++            "figi": self.figi,
++            "config_hash": self.config_hash,
++            "created_at": self.created_at,
++            "updated_at": self.updated_at,
++            "data": _validate_state_value(unfreeze(self.data), _path="data"),
++        }
++
++    def to_json(self) -> str:
++        """Детерминированная каноническая JSON-строка состояния."""
++        return _canonical_json(self.to_payload())
++
++    @classmethod
++    def from_payload(cls, payload: Any) -> "StrategyState":
++        """Контролируемая десериализация записи состояния.
++
++        Ошибки классифицированы (fail-closed, без маскировки):
++          * не-отображение / отсутствующие поля / неверные ТИПЫ полей —
++            StateCorruptionError (запись повреждена; НЕ подменяется
++            пустым состоянием);
++          * неизвестная версия схемы — StateSchemaError (требуется явное
++            решение о совместимости/сбросе);
++          * семантически невалидные значения (набор символов ключей,
++            формат config_hash, метки времени, данные) —
++            StateValidationError.
++        """
++        if not isinstance(payload, Mapping):
++            raise StateCorruptionError(
++                "запись состояния должна быть JSON-объектом; получено "
++                f"{type(payload).__name__}")
++        required = ("schema_version", "strategy_id", "figi", "config_hash",
++                    "created_at", "updated_at", "data")
++        missing = [key for key in required if key not in payload]
++        if missing:
++            raise StateCorruptionError(
++                "запись состояния повреждена: отсутствуют обязательные "
++                f"поля {sorted(missing)}; пустым состоянием не "
++                "подменяется (fail-closed)")
++
++        schema_version = payload["schema_version"]
++        if isinstance(schema_version, bool) or \
++                not isinstance(schema_version, int):
++            raise StateCorruptionError(
++                "запись состояния повреждена: schema_version должен быть "
++                f"целым числом; получено {type(schema_version).__name__}")
++        if schema_version != STATE_SCHEMA_VERSION:
++            raise StateSchemaError(
++                f"неизвестная версия схемы состояния {schema_version!r} "
++                f"(текущая: {STATE_SCHEMA_VERSION}); запись не читается и "
++                "не заменяется пустым состоянием: требуется ЯВНОЕ решение "
++                "о совместимости или сбросе (fail-closed)")
++
++        strategy_id = payload["strategy_id"]
++        if not isinstance(strategy_id, str):
++            raise StateCorruptionError(
++                "запись состояния повреждена: strategy_id должен быть "
++                f"строкой; получено {type(strategy_id).__name__}")
++        figi = payload["figi"]
++        if not isinstance(figi, str):
++            raise StateCorruptionError(
++                "запись состояния повреждена: figi должен быть строкой; "
++                f"получено {type(figi).__name__}")
++        config_hash = payload["config_hash"]
++        if not isinstance(config_hash, str):
++            raise StateCorruptionError(
++                "запись состояния повреждена: config_hash должен быть "
++                f"строкой; получено {type(config_hash).__name__}")
++        created_at = payload["created_at"]
++        updated_at = payload["updated_at"]
++        if not isinstance(created_at, str):
++            raise StateCorruptionError(
++                "запись состояния повреждена: created_at должен быть "
++                f"строкой; получено {type(created_at).__name__}")
++        if not isinstance(updated_at, str):
++            raise StateCorruptionError(
++                "запись состояния повреждена: updated_at должен быть "
++                f"строкой; получено {type(updated_at).__name__}")
++        data = payload["data"]
++        if not isinstance(data, Mapping):
++            raise StateCorruptionError(
++                "запись состояния повреждена: data должен быть "
++                f"JSON-объектом; получено {type(data).__name__}")
++
++        return cls(
++            strategy_id=strategy_id,
++            figi=figi,
++            config_hash=config_hash,
++            schema_version=schema_version,
++            data=ImmutableMapping(data),
++            created_at=created_at,
++            updated_at=updated_at,
++        )
++
++    def key(self) -> Tuple[str, str]:
++        """Ключ изоляции состояния (strategy_id, figi)."""
++        return (self.strategy_id, self.figi)
++
++
++# ---------------------------------------------------------------------------
++# Хранилище состояния
++# ---------------------------------------------------------------------------
++
++
++class StateStore:
++    """Хранилище состояний по ключу (strategy_id, FIGI).
++
++    Режимы (ТЗ Stage B §3.2):
++      * persistent — ЯВНО переданный path (каталог): по одной JSON-записи
++        на ключ, атомарная запись (tmp + os.replace + fsync), детермини-
++        рованное содержимое (_canonical_json от payload состояния);
++      * memory — path не передан (path=None): записи живут в памяти
++        процесса. Скрытого пути по умолчанию НЕ существует: включить
++        persistent-режим без явного пути невозможно; путь из конфигурации
++        разрешается resolve_state_store_path (без fallback на другой путь).
++
++    Гарантии:
++      * изоляция по ключу: каждой паре соответствует отдельная запись
++        (отдельный файл); запись одной пары не касается других;
++      * наружу НЕ выдаются внутренние изменяемые ссылки: состояния
++        неизменяемы (frozen + ImmutableMapping), источники копируются;
++      * детерминированное сохранение: одинаковое содержимое -> одинаковые
++        байты (sort_keys, без пробелов, allow_nan=False);
++      * проверка версии схемы и соответствия strategy_id/FIGI/config_hash
++        при каждом чтении; повреждённые записи обнаруживаются и дают
++        StateCorruptionError/StateSchemaError — НЕ подменяются пустым
++        состоянием;
++      * несовпадение config_hash — StateConfigMismatchError: старое
++        состояние НЕ переносится на новую конфигурацию автоматически,
++        требуется ЯВНОЕ решение (reset_state);
++      * корректность при параллельных обращениях: все операции под
++        RLock хранилища; составные операции менеджера — под его RLock
++        плюс контроль существования записи.
++    """
++
++    def __init__(self, *, path: Optional[str] = None) -> None:
++        self._lock = threading.RLock()
++        if path is None:
++            # Memory-режим: явный и документированный; используется
++            # тестами и процессами без persistent-истории. Скрытого
++            # файлового пути нет.
++            self._path: Optional[str] = None
++            self._records: dict = {}
++            return
++        if not isinstance(path, str) or not path.strip():
++            raise StateStoreConfigError(
++                "path persistent-хранилища состояния должен быть непустой "
++                f"строкой; получено {type(path).__name__}")
++        self._path = path
++        os.makedirs(self._path, exist_ok=True)
++
++    # --- свойства -----------------------------------------------------------
++
++    @property
++    def mode(self) -> str:
++        """Режим хранилища: 'persistent' или 'memory'."""
++        return "persistent" if self._path is not None else "memory"
++
++    @property
++    def path(self) -> Optional[str]:
++        """Явно переданный путь persistent-хранилища (memory -> None)."""
++        return self._path
++
++    # --- внутренние операции --------------------------------------------------
++
++    @staticmethod
++    def _filename(strategy_id: str, figi: str) -> str:
++        """Имя файла записи: безопасный набор символов проверен ключами."""
++        return f"{strategy_id}__{figi}.json"
++
++    def _load(self, strategy_id: str, figi: str) -> Optional[StrategyState]:
++        """Чтение одной записи с ПОЛНОЙ проверкой (fail-closed).
++
++        Отсутствие записи — None (нормальная ситуация, обрабатывается
++        вызывающим кодом); повреждённая запись — StateCorruptionError /
++        StateSchemaError / StateValidationError (НЕ подменяется пустым
++        состоянием).
++        """
++        if self._path is None:
++            return self._records.get((strategy_id, figi))
++        file_path = os.path.join(self._path,
++                                 self._filename(strategy_id, figi))
++        if not os.path.isfile(file_path):
++            return None
++        try:
++            with open(file_path, "r", encoding="utf-8") as handle:
++                raw = handle.read()
++        except OSError as exc:
++            raise StateCorruptionError(
++                f"запись состояния {strategy_id!r}/{figi!r} не читается "
++                f"({file_path}): {exc}") from exc
++        try:
++            payload = json.loads(raw)
++        except (ValueError, TypeError) as exc:
++            raise StateCorruptionError(
++                f"запись состояния {strategy_id!r}/{figi!r} повреждена "
++                f"(не читается как JSON: {exc}); пустым состоянием не "
++                "подменяется (fail-closed)") from exc
++        try:
++            return StrategyState.from_payload(payload)
++        except StrategyStateError as exc:
++            raise type(exc)(
++                f"запись состояния {strategy_id!r}/{figi!r} "
++                f"({file_path}): {exc}") from exc
++
++    def _persist(self, state: StrategyState) -> None:
++        """Детерминированная атомарная запись одной записи состояния."""
++        payload_text = state.to_json()
++        if self._path is None:
++            self._records[(state.strategy_id, state.figi)] = state
++            return
++        os.makedirs(self._path, exist_ok=True)
++        final_path = os.path.join(
++            self._path,
++            self._filename(state.strategy_id, state.figi))
++        fd, tmp_path = tempfile.mkstemp(
++            dir=self._path, prefix=".tmp-state-", suffix=".json")
++        try:
++            with os.fdopen(fd, "w", encoding="utf-8") as handle:
++                handle.write(payload_text)
++                handle.flush()
++                os.fsync(handle.fileno())
++            os.replace(tmp_path, final_path)
++        except Exception:
++            try:
++                if os.path.exists(tmp_path):
++                    os.remove(tmp_path)
++            except OSError:
++                pass
++            raise
++        try:
++            dir_fd = os.open(self._path, os.O_RDONLY)
++            try:
++                os.fsync(dir_fd)
++            finally:
++                os.close(dir_fd)
++        except OSError:
++            # fsync каталога может быть не поддержан файловой системой:
++            # атомарность самой записи уже обеспечена os.replace.
++            pass
++
++    # --- публичный интерфейс (ТЗ Stage B §3.2) --------------------------------
++
++    def get_state(self,
++                  strategy_id: Any,
++                  figi: Any,
++                  *,
++                  config_hash: Any = None) -> Optional[StrategyState]:
++        """Состояние пары (strategy_id, figi) или None, если записи нет.
++
++        config_hash (опционально) — ожидаемый hash подтверждённой
++        конфигурации: при передаче несовпадающего значения —
++        StateConfigMismatchError (контролируемая ошибка; старое состояние
++        НЕ переносится на новую конфигурацию автоматически, требуется
++        ЯВНОЕ решение о сбросе). Без config_hash возвращается состояние
++        как есть (со своим config_hash в поле).
++        """
++        validate_strategy_id(strategy_id)
++        validate_figi(figi)
++        if config_hash is not None:
++            _validate_config_hash_of_state(config_hash)
++        with self._lock:
++            state = self._load(strategy_id, figi)
++        if state is None:
++            return None
++        if config_hash is not None and state.config_hash != config_hash:
++            raise StateConfigMismatchError(
++                f"config_hash сохранённого состояния ({state.config_hash!r}) "
++                f"не совпадает с ожидаемым ({config_hash!r}) для пары "
++                f"({strategy_id!r}, {figi!r}); старое состояние НЕ переносится "
++                "на новую конфигурацию автоматически: требуется ЯВНОЕ "
++                "решение — reset_state или отдельная совместимая обработка "
++                "(fail-closed, Stage B)")
++        return state
++
++    def create_state(self,
++                     strategy_id: Any,
++                     figi: Any,
++                     config_hash: Any,
++                     data: Optional[Mapping[str, Any]] = None,
++                     *,
++                     now: Optional[str] = None) -> StrategyState:
++        """Создание НЕЗАВИСИМОГО состояния для отсутствующей пары.
++
++        Существующая запись -> StateAlreadyExistsError (без перезаписи,
++        без скрытого сброса). Существование проверяется ПОД замком.
++        """
++        validate_strategy_id(strategy_id)
++        validate_figi(figi)
++        _validate_config_hash_of_state(config_hash)
++        with self._lock:
++            existing = self._load(strategy_id, figi)
++            if existing is not None:
++                raise StateAlreadyExistsError(
++                    f"состояние пары ({strategy_id!r}, {figi!r}) уже "
++                    f"существует (config_hash={existing.config_hash!r}); "
++                    "перезапись и скрытый сброс запрещены: используйте "
++                    "save_state для обновления или reset_state для ЯВНОГО "
++                    "сброса (fail-closed)")
++            state = StrategyState.create(
++                strategy_id, figi, config_hash, data, now=now)
++            self._persist(state)
++            return state
++
++    def save_state(self,
++                   strategy_id: Any,
++                   figi: Any,
++                   state: Any) -> None:
++        """Сохранение изменений состояния СУЩЕСТВУЮЩЕЙ пары.
++
++        Проверяется: точный тип StrategyState, соответствие ключей
++        записи и аргументов, совпадение config_hash с сохранённой
++        записью (несовпадение — StateConfigMismatchError: сохранение не
++        переносит состояние на другую конфигурацию скрыто; создание —
++        только create_state: запись отсутствует -> StateNotFoundError).
++        """
++        validate_strategy_id(strategy_id)
++        validate_figi(figi)
++        if type(state) is not StrategyState:
++            # Точный тип — то же решение, что и Stage A.2.1 для
++            # StrategyConfig: подкласс не может ослабить проверку.
++            raise StateValidationError(
++                "save_state принимает ТОЛЬКО точный тип StrategyState; "
++                f"получено {type(state).__name__}")
++        if state.strategy_id != strategy_id or state.figi != figi:
++            raise StateValidationError(
++                "ключи состояния не совпадают с аргументами: "
++                f"запись ({state.strategy_id!r}, {state.figi!r}) против "
++                f"аргументов ({strategy_id!r}, {figi!r}); разнобой ключей "
++                "недопустим (изоляция по (strategy_id, FIGI))")
++        with self._lock:
++            existing = self._load(strategy_id, figi)
++            if existing is None:
++                raise StateNotFoundError(
++                    f"состояние пары ({strategy_id!r}, {figi!r}) не "
++                    "существует: создание — только create_state "
++                    "(save_state не создаёт записи скрыто)")
++            if existing.config_hash != state.config_hash:
++                raise StateConfigMismatchError(
++                    f"save_state не переносит состояние на новую "
++                    f"конфигурацию: сохранено {existing.config_hash!r}, "
++                    f"записывается {state.config_hash!r}; требуется "
++                    "ЯВНОЕ решение (reset_state) — fail-closed")
++            self._persist(state)
++
++    def reset_state(self, strategy_id: Any, figi: Any) -> bool:
++        """ЯВНЫЙ сброс состояния ОДНОЙ пары (strategy_id, figi).
++
++        Возвращает True, если запись существовала и удалена; False,
++        если записи не было. Другие пары НЕ затрагиваются.
++        """
++        validate_strategy_id(strategy_id)
++        validate_figi(figi)
++        with self._lock:
++            if self._path is None:
++                return self._records.pop((strategy_id, figi), None) \
++                    is not None
++            file_path = os.path.join(self._path,
++                                     self._filename(strategy_id, figi))
++            if not os.path.isfile(file_path):
++                return False
++            os.remove(file_path)
++            return True
++
++    def list_states(self) -> List[StrategyState]:
++        """Все записи хранилища, отсортированные по (strategy_id, figi).
++
++        Каждая запись полностью проверяется при чтении; повреждённая
++        запись даёт StateCorruptionError/StateSchemaError (не пропускается
++        молча). Порядок детерминированный.
++        """
++        with self._lock:
++            if self._path is None:
++                keys = sorted(self._records.keys())
++                return [self._records[key] for key in keys]
++            states: List[StrategyState] = []
++            for name in sorted(os.listdir(self._path)):
++                if not name.endswith(".json") or name.startswith(".tmp-"):
++                    continue
++                file_path = os.path.join(self._path, name)
++                if not os.path.isfile(file_path):
++                    continue
++                try:
++                    with open(file_path, "r", encoding="utf-8") as handle:
++                        payload = json.loads(handle.read())
++                except (OSError, ValueError, TypeError) as exc:
++                    raise StateCorruptionError(
++                        f"запись состояния ({name}) повреждена и не "
++                        f"читается ({file_path}): {exc}; пустым "
++                        "состоянием не подменяется (fail-closed)") from exc
++                state = StrategyState.from_payload(payload)
++                # Защита от рассинхронизации имени файла и содержимого:
++                # источник истины — содержимое; имя должно совпадать.
++                expected_name = self._filename(state.strategy_id, state.figi)
++                if expected_name != name:
++                    raise StateCorruptionError(
++                        f"запись состояния повреждена: имя файла {name!r} "
++                        f"не соответствует содержимому "
++                        f"({state.strategy_id!r}, {state.figi!r}); "
++                        "запись не маскируется (fail-closed)")
++                states.append(state)
++            states.sort(key=lambda item: (item.strategy_id, item.figi))
++            return states
++
++
++def resolve_state_store_path(config: Mapping[str, Any]) -> str:
++    """ЯВНОЕ разрешение пути persistent-хранилища из конфигурации.
++
++    ТЗ Stage B §3.2/§4.16: путь постоянного хранилища делается явно
++    конфигурируемым и обязательным для включения persistent-режима;
++    скрытый путь не придумывается, состояние не записывается в старые
++    файлы Samsung.
++
++    Правила (fail-closed):
++      * конфигурация должна быть отображением;
++      * ключ STATE_STORE_PATH обязателен: его отсутствие —
++        StateStoreConfigError (никакого пути по умолчанию, никакого
++        fallback на env/каталог процесса/старые файлы Samsung);
++      * значение — непустая строка.
++    """
++    if not isinstance(config, Mapping):
++        raise StateStoreConfigError(
++            "конфигурация хранилища состояния должна быть отображением; "
++            f"получено {type(config).__name__}")
++    if STATE_STORE_CONFIG_KEY not in config:
++        raise StateStoreConfigError(
++            f"путь persistent-хранилища состояния не задан: отсутствует "
++            f"обязательный явный ключ {STATE_STORE_CONFIG_KEY!r}; скрытый "
++            "путь по умолчанию НЕ используется (fail-closed): включение "
++            "persistent-режима возможно ТОЛЬКО явной конфигурацией")
++    value = config[STATE_STORE_CONFIG_KEY]
++    if not isinstance(value, str) or not value.strip():
++        raise StateStoreConfigError(
++            f"{STATE_STORE_CONFIG_KEY} должен быть непустой строкой; "
++            f"получено {type(value).__name__}")
++    return value
++
++
++# ---------------------------------------------------------------------------
++# Менеджер состояния стратегии
++# ---------------------------------------------------------------------------
++
++
++class StrategyStateManager:
++    """Выдаёт стратегии ТОЛЬКО её собственное состояние.
++
++    ТЗ Stage B §3.3:
++      * состояние по паре strategy_id + FIGI (изоляция по ключу);
++      * независимое состояние создаётся при отсутствии записи;
++      * изменения сохраняются; перекрёстное загрязнение исключено
++        (каждая операция работает с одной записью под замком);
++      * параллельные обращения корректны (замки менеджера и хранилища,
++        контроль существования записи при создании);
++      * глобальный mutable context НЕ используется (все зависимости
++        внедрены явно);
++      * одно состояние на все инструменты НЕ хранится.
++
++    Интеграция со Stage A:
++      * config (StrategyConfig) принимается ТОЛЬКО точного типа —
++        type(config) is StrategyConfig (решение Stage A.2.1, документировано
++        в attribution.py; подкласс не может ослабить привязку состояния
++        к конфигурации);
++      * AttributionContext принимается ТОЛЬКО проверенный — через
++        attribution._resolve_context (тот же вход проверки маркера
++        проверенного создания, что и для factory/stamp; неподтверждённый
++        контекст отклоняется);
++      * отсутствие подтверждённой конфигурации (ни config, ни config_hash)
++        — StateValidationError: fail-closed, никаких фиктивных значений.
++    """
++
++    def __init__(self,
++                 store: Any,
++                 *,
++                 clock: Optional[Callable[[], str]] = None) -> None:
++        if type(store) is not StateStore:
++            raise StateStoreConfigError(
++                "StrategyStateManager требует точный тип StateStore; "
++                f"получено {type(store).__name__}")
++        self._store: StateStore = store
++        self._clock = clock or _utc_now_iso
++        self._lock = threading.RLock()
++
++    # --- внутренние операции --------------------------------------------------
++
++    def _resolve_config_hash(self,
++                             strategy_id: str,
++                             figi: str,
++                             config: Any,
++                             config_hash: Any) -> str:
++        """Разрешение ожидаемого config_hash по Stage A контрактам.
++
++        Принимается ровно один источник (или оба согласованных):
++          * config — ТОЛЬКО точный тип StrategyConfig; его strategy_id
++            обязан совпадать с ключом;
++          * config_hash — строка формата Stage A.2.
++        Ничего не передано -> StateValidationError (fail-closed).
++        """
++        if config is None and config_hash is None:
++            raise StateValidationError(
++                f"состояние ({strategy_id!r}, {figi!r}) не может быть "
++                "получено/создано без подтверждённой конфигурации: не "
++                "передан ни StrategyConfig, ни его config_hash; фиктивные "
++                "значения и автоподстановка запрещены (fail-closed)")
++        resolved: Optional[str] = None
++        if config is not None:
++            if type(config) is not StrategyConfig:
++                raise StateValidationError(
++                    "config состояния принимается ТОЛЬКО точного типа "
++                    "StrategyConfig (наследование не поддерживается — "
++                    "решение Stage A.2.1; подкласс не может ослабить "
++                    f"привязку состояния к конфигурации); получено "
++                    f"{type(config).__name__}")
++            if config.strategy_id != strategy_id:
++                raise StateValidationError(
++                    f"config.strategy_id ({config.strategy_id!r}) не "
++                    f"совпадает с ключом состояния ({strategy_id!r}); "
++                    "состояние не может быть привязано к чужой "
++                    "конфигурации (fail-closed)")
++            resolved = config.config_hash
++        if config_hash is not None:
++            _validate_config_hash_of_state(config_hash)
++            if resolved is not None and resolved != config_hash:
++                raise StateValidationError(
++                    "config_hash и config.config_hash противоречат друг "
++                    f"другу: {config_hash!r} против {resolved!r}; "
++                    "состояние не выдаётся (fail-closed)")
++            resolved = config_hash
++        return resolved  # type: ignore[return-value]
++
++    def _get_or_create(self,
++                       strategy_id: str,
++                       figi: str,
++                       expected_hash: str) -> StrategyState:
++        """Получение состояния; отсутствие записи -> независимое создание.
++
++        Составная операция под замком менеджера; StateAlreadyExistsError
++        (гонка между get и create) обрабатывается повторным чтением.
++        """
++        with self._lock:
++            state = self._store.get_state(strategy_id, figi,
++                                          config_hash=expected_hash)
++            if state is not None:
++                return state
++            try:
++                return self._store.create_state(
++                    strategy_id, figi, expected_hash,
++                    now=self._clock())
++            except StateAlreadyExistsError:
++                # Гонка: запись создана параллельным потоком между
++                # get_state и create_state. Повторное чтение под замком
++                # хранилища; несовпадающий config_hash той записи дал бы
++                # StateConfigMismatchError здесь же.
++                state = self._store.get_state(strategy_id, figi,
++                                              config_hash=expected_hash)
++                if state is None:
++                    raise StateCorruptionError(
++                        f"состояние ({strategy_id!r}, {figi!r}): после "
++                        "StateAlreadyExistsError запись не найдена; "
++                        "хранилище неконсистентно (fail-closed)")
++                return state
++
++    # --- публичный интерфейс (ТЗ Stage B §3.3) --------------------------------
++
++    def get_state(self,
++                  strategy_id: Any,
++                  figi: Any,
++                  *,
++                  config: Any = None,
++                  config_hash: Any = None) -> StrategyState:
++        """Собственное состояние пары (strategy_id, figi).
++
++        Отсутствие записи -> создание независимого состояния, привязанного
++        к переданной конфигурации. Несовпадение config_hash сохранённой
++        записи с ожидаемым — StateConfigMismatchError (без автоматического
++        переноса на новую конфигурацию).
++        """
++        validate_strategy_id(strategy_id)
++        validate_figi(figi)
++        expected_hash = self._resolve_config_hash(
++            strategy_id, figi, config, config_hash)
++        return self._get_or_create(strategy_id, figi, expected_hash)
++
++    def update_state(self,
++                     strategy_id: Any,
++                     figi: Any,
++                     *,
++                     config: Any = None,
++                     config_hash: Any = None,
++                     data: Any = None,
++                     updater: Optional[Callable[[StrategyState],
++                                                Mapping[str, Any]]] = None,
++                     now: Optional[str] = None) -> StrategyState:
++        """Обновление данных состояния пары (get-or-create + save).
++
++        Ровно один из аргументов data / updater:
++          * data — новые данные целиком;
++          * updater — функция (текущее состояние) -> новые данные;
++            исключение из updater прерывает операцию БЕЗ записи
++            (сохранённое состояние не меняется).
++        Возвращает НОВОЕ неизменяемое состояние (записанное в хранилище).
++        """
++        validate_strategy_id(strategy_id)
++        validate_figi(figi)
++        if (data is None) == (updater is None):
++            raise StateValidationError(
++                "update_state требует РОВНО ОДИН источник новых данных: "
++                "data или updater")
++        expected_hash = self._resolve_config_hash(
++            strategy_id, figi, config, config_hash)
++        stamp = _validate_timestamp(now, "now") if now is not None else None
++        with self._lock:
++            current = self._get_or_create(strategy_id, figi, expected_hash)
++            if updater is not None:
++                new_data = updater(current)
++            else:
++                new_data = data
++            if not isinstance(new_data, Mapping):
++                raise StateValidationError(
++                    "новые данные состояния должны быть отображением; "
++                    f"получено {type(new_data).__name__}")
++            new_state = current.with_data(new_data, now=stamp)
++            self._store.save_state(strategy_id, figi, new_state)
++            return new_state
++
++    def reset_state(self, strategy_id: Any, figi: Any) -> bool:
++        """ЯВНЫЙ сброс состояния одной пары (другие пары не затрагиваются)."""
++        validate_strategy_id(strategy_id)
++        validate_figi(figi)
++        with self._lock:
++            return self._store.reset_state(strategy_id, figi)
++
++    def list_states(self) -> List[StrategyState]:
++        """Все состояния хранилища (детерминированный порядок)."""
++        with self._lock:
++            return self._store.list_states()
++
++    # --- интеграция с атрибуцией Stage A ---------------------------------------
++
++    def get_state_for_context(self,
++                              context: Any,
++                              figi: Any) -> StrategyState:
++        """Состояние по ПРОВЕРЕННОМУ AttributionContext (Stage A.2.1).
++
++        Контекст проходит _resolve_context: принимается только контекст
++        точного типа AttributionContext с маркером проверенного создания
++        (тот же вход, что и для factory/stamp/CSV/JSONL). strategy_id и
++        config_hash берутся ТОЛЬКО из проверенного контекста.
++        """
++        validate_figi(figi)
++        from attribution import _resolve_context
++        verified = _resolve_context(context)
++        return self.get_state(
++            verified.strategy_id, figi, config_hash=verified.config_hash)
++
++    def update_state_for_context(self,
++                                 context: Any,
++                                 figi: Any,
++                                 *,
++                                 data: Any = None,
++                                 updater: Optional[Callable[
++                                     [StrategyState],
++                                     Mapping[str, Any]]] = None,
++                                 now: Optional[str] = None) -> StrategyState:
++        """Обновление состояния по ПРОВЕРЕННОМУ AttributionContext."""
++        validate_figi(figi)
++        from attribution import _resolve_context
++        verified = _resolve_context(context)
++        return self.update_state(
++            verified.strategy_id, figi,
++            config_hash=verified.config_hash,
++            data=data, updater=updater, now=now)
+diff -ruN a/candidate/tests/test_stage_b_state_isolation.py b/candidate/tests/test_stage_b_state_isolation.py
+--- a/candidate/tests/test_stage_b_state_isolation.py	1970-01-01 00:00:00.000000000 +0000
++++ b/candidate/tests/test_stage_b_state_isolation.py	2026-11-27 18:34:52.073824544 +0000
+@@ -0,0 +1,1138 @@
++# tests/test_stage_b_state_isolation.py — SAMSUNG V4 — STAGE B.
++#
++# Изолированное состояние стратегии по ключу (strategy_id, FIGI).
++# Обязательные сценарии ТЗ Stage B §4 (1–16) + граничные случаи и
++# гонки конкурентного доступа. Все тесты offline, без сети и брокера;
++# никаких реальных заявок; старые файлы Samsung не затрагиваются.
++#
++# Соответствие сценариев ТЗ §4 — заголовки блоков тестов помечены
++# «ТЗ §4.N».
++
++import json
++import os
++import threading
++from concurrent.futures import ThreadPoolExecutor
++
++import pytest
++
++import strategy_state as ss
++from attribution import AttributionContext
++from strategy_api import (
++    ActivationMode,
++    StrategyConfig,
++    compute_config_hash,
++)
++
++
++# ---------------------------------------------------------------------------
++# Фикстуры и помощники
++# ---------------------------------------------------------------------------
++
++HASH_A = "a" * 64
++HASH_B = "b" * 64
++HASH_C = "c" * 64
++STAMP_T1 = "2026-01-01T10:00:00.000000Z"
++STAMP_T2 = "2026-01-02T11:00:00.000000Z"
++
++
++def make_config(strategy_id="s_a", params=None, version="v1"):
++    """Валидная StrategyConfig с корректным config_hash (Stage A контракт)."""
++    params = params or {"length": 14}
++    return StrategyConfig(
++        strategy_id=strategy_id,
++        strategy_version=version,
++        params=params,
++        config_hash=compute_config_hash(strategy_id, version, params),
++    )
++
++
++@pytest.fixture
++def store_path(tmp_path):
++    """Явный путь persistent-хранилища (вне дерева проекта)."""
++    return str(tmp_path / "state_store")
++
++
++@pytest.fixture
++def store(store_path):
++    return ss.StateStore(path=store_path)
++
++
++@pytest.fixture
++def manager(store):
++    return ss.StrategyStateManager(store)
++
++
++def sha256_of(path):
++    import hashlib
++    with open(path, "rb") as handle:
++        return hashlib.sha256(handle.read()).hexdigest()
++
++
++# ---------------------------------------------------------------------------
++# ТЗ §4.1 — две стратегии на одном FIGI имеют независимое состояние
++# ---------------------------------------------------------------------------
++
++
++class TestTwoStrategiesSameFigi:
++    def test_states_are_independent_objects_and_records(self, manager):
++        st_a = manager.get_state("s_a", "FIGI_X", config_hash=HASH_A)
++        st_b = manager.get_state("s_b", "FIGI_X", config_hash=HASH_B)
++        assert st_a is not st_b
++        assert st_a.strategy_id == "s_a" and st_b.strategy_id == "s_b"
++        assert st_a.figi == st_b.figi == "FIGI_X"
++        assert st_a.config_hash == HASH_A
++        assert st_b.config_hash == HASH_B
++        assert st_a.data == {} and st_b.data == {}
++
++    def test_update_of_one_does_not_leak_into_other(self, manager):
++        manager.get_state("s_a", "FIGI_X", config_hash=HASH_A)
++        manager.get_state("s_b", "FIGI_X", config_hash=HASH_B)
++        manager.update_state("s_a", "FIGI_X", config_hash=HASH_A,
++                             data={"position": "LONG", "streak": 3})
++        st_b = manager.get_state("s_b", "FIGI_X", config_hash=HASH_B)
++        st_a = manager.get_state("s_a", "FIGI_X", config_hash=HASH_A)
++        assert dict(st_b.data) == {}
++        assert dict(st_a.data) == {"position": "LONG", "streak": 3}
++
++    def test_persistent_records_are_separate_files(self, store_path):
++        store = ss.StateStore(path=store_path)
++        mgr = ss.StrategyStateManager(store)
++        mgr.get_state("s_a", "FIGI_X", config_hash=HASH_A)
++        mgr.get_state("s_b", "FIGI_X", config_hash=HASH_B)
++        files = sorted(os.listdir(store_path))
++        assert files == ["s_a__FIGI_X.json", "s_b__FIGI_X.json"]
++
++
++# ---------------------------------------------------------------------------
++# ТЗ §4.2 — одна стратегия на двух FIGI имеет независимое состояние
++# ---------------------------------------------------------------------------
++
++
++class TestOneStrategyTwoFigi:
++    def test_states_are_independent(self, manager):
++        st_x = manager.get_state("s_a", "FIGI_X", config_hash=HASH_A)
++        st_y = manager.get_state("s_a", "FIGI_Y", config_hash=HASH_A)
++        assert st_x is not st_y
++        assert st_x.figi == "FIGI_X" and st_y.figi == "FIGI_Y"
++        assert st_x.config_hash == st_y.config_hash == HASH_A
++
++    def test_update_of_one_figi_does_not_leak_into_other(self, manager):
++        manager.get_state("s_a", "FIGI_X", config_hash=HASH_A)
++        manager.get_state("s_a", "FIGI_Y", config_hash=HASH_A)
++        manager.update_state("s_a", "FIGI_X", config_hash=HASH_A,
++                             data={"streak": 2})
++        assert dict(manager.get_state(
++            "s_a", "FIGI_Y", config_hash=HASH_A).data) == {}
++        assert dict(manager.get_state(
++            "s_a", "FIGI_X", config_hash=HASH_A).data) == {"streak": 2}
++
++    def test_reset_of_one_figi_keeps_other(self, manager):
++        store = manager._store
++        st_y_before = store.create_state("s_a", "FIGI_Y", HASH_A,
++                                         data={"v": "Y"}, now=STAMP_T1)
++        manager.get_state("s_a", "FIGI_X", config_hash=HASH_A)
++        assert manager.reset_state("s_a", "FIGI_X") is True
++        # FIGI_Y не затронут: запись та же, данные на месте.
++        st_y_after = store.get_state("s_a", "FIGI_Y", config_hash=HASH_A)
++        assert st_y_after == st_y_before
++        assert st_y_after.data["v"] == "Y"
++        # FIGI_X пересоздаётся как новое независимое состояние.
++        st_x = manager.get_state("s_a", "FIGI_X", config_hash=HASH_A)
++        assert dict(st_x.data) == {}
++
++
++# ---------------------------------------------------------------------------
++# ТЗ §4.3 — изменение состояния одной пары не изменяет остальные
++# ---------------------------------------------------------------------------
++
++
++class TestChangeOnePairOnly:
++    def test_payloads_of_other_pairs_byte_identical(self, manager, store_path):
++        pairs = [("s_a", "FIGI_X"), ("s_a", "FIGI_Y"), ("s_b", "FIGI_X")]
++        for sid, figi in pairs:
++            manager.get_state(sid, figi, config_hash=HASH_A)
++        manager.update_state("s_a", "FIGI_X", config_hash=HASH_A,
++                             data={"n": 1})
++
++        def payload_of(sid, figi):
++            with open(os.path.join(
++                    store_path, f"{sid}__{figi}.json"),
++                    "r", encoding="utf-8") as handle:
++                return handle.read()
++
++        assert payload_of("s_a", "FIGI_Y") == payload_of("s_a", "FIGI_Y")
++        y_before = payload_of("s_a", "FIGI_Y")
++        x_before = payload_of("s_b", "FIGI_X")
++        manager.update_state("s_a", "FIGI_Y", config_hash=HASH_A,
++                             data={"n": 99})
++        assert payload_of("s_a", "FIGI_Y") != y_before  # целевая изменилась
++        assert payload_of("s_b", "FIGI_X") == x_before  # чужая НЕ изменилась
++        st_x = manager.get_state("s_a", "FIGI_X", config_hash=HASH_A)
++        assert dict(st_x.data) == {"n": 1}              # и эта тоже
++
++    def test_created_at_of_untouched_pairs_preserved(self, manager):
++        # Явные метки времени для проверки сохранности created_at:
++        store = manager._store
++        store.create_state("s_a", "FIGI_X", HASH_A, now=STAMP_T1)
++        store.create_state("s_b", "FIGI_X", HASH_B, now=STAMP_T1)
++        manager.update_state("s_a", "FIGI_X", config_hash=HASH_A,
++                             data={"n": 1}, now=STAMP_T2)
++        st1_after = store.get_state("s_a", "FIGI_X", config_hash=HASH_A)
++        st2_after = store.get_state("s_b", "FIGI_X", config_hash=HASH_B)
++        # Целевая пара: обновление (created_at сохранён), не пересоздание.
++        assert st1_after.created_at == STAMP_T1
++        assert st1_after.updated_at == STAMP_T2
++        # Чужая пара не тронута вовсе.
++        assert st2_after.created_at == STAMP_T1
++        assert st2_after.updated_at == STAMP_T1
++
++
++# ---------------------------------------------------------------------------
++# ТЗ §4.4 — создание новой пары не затрагивает существующие пары
++# ---------------------------------------------------------------------------
++
++
++class TestNewPairDoesNotTouchExisting:
++    def test_creation_is_additive(self, manager, store_path):
++        manager.get_state("s_a", "FIGI_X", config_hash=HASH_A)
++        x_bytes_before = open(
++            os.path.join(store_path, "s_a__FIGI_X.json"), "rb").read()
++        manager.get_state("s_b", "FIGI_NEW", config_hash=HASH_B)
++        x_bytes_after = open(
++            os.path.join(store_path, "s_a__FIGI_X.json"), "rb").read()
++        assert x_bytes_before == x_bytes_after
++        assert os.path.isfile(
++            os.path.join(store_path, "s_b__FIGI_NEW.json"))
++        assert dict(manager.get_state(
++            "s_a", "FIGI_X", config_hash=HASH_A).data) == {}
++
++    def test_list_states_contains_all_and_is_deterministic(self, manager):
++        for sid, figi in [("s_b", "FIGI_Y"), ("s_a", "FIGI_X"),
++                          ("s_b", "FIGI_X")]:
++            manager.get_state(sid, figi, config_hash=HASH_A)
++        keys1 = [st.key() for st in manager.list_states()]
++        keys2 = [st.key() for st in manager.list_states()]
++        assert keys1 == keys2
++        assert keys1 == sorted([("s_b", "FIGI_Y"), ("s_a", "FIGI_X"),
++                                ("s_b", "FIGI_X")])
++        assert keys1 == [("s_a", "FIGI_X"), ("s_b", "FIGI_X"),
++                         ("s_b", "FIGI_Y")]
++
++
++# ---------------------------------------------------------------------------
++# ТЗ §4.5 — сохранение и восстановление после перезапуска
++# ---------------------------------------------------------------------------
++
++
++class TestRestartPersistence:
++    def test_state_restored_by_new_store_instance(self, store_path):
++        mgr1 = ss.StrategyStateManager(ss.StateStore(path=store_path))
++        mgr1.get_state("s_a", "FIGI_X", config_hash=HASH_A)
++        created = mgr1.update_state(
++            "s_a", "FIGI_X", config_hash=HASH_A, data={
++                "position": "LONG", "entry": 100.5, "streak": 2,
++                "seen": ["t1", "t2"], "nested": {"a": [1, 2, {"b": True}]},
++            })
++        # «Перезапуск»: новый экземпляр хранилища на том же явном пути.
++        mgr2 = ss.StrategyStateManager(ss.StateStore(path=store_path))
++        restored = mgr2.get_state("s_a", "FIGI_X", config_hash=HASH_A)
++        assert restored == created
++        assert restored.created_at == created.created_at
++        assert restored.updated_at == created.updated_at
++        assert restored.config_hash == HASH_A
++        assert dict(restored.data) == {
++            "position": "LONG", "entry": 100.5, "streak": 2,
++            "seen": ["t1", "t2"], "nested": {"a": [1, 2, {"b": True}]},
++        }
++
++    def test_unicode_and_empty_data_survive_restart(self, store_path):
++        mgr1 = ss.StrategyStateManager(ss.StateStore(path=store_path))
++        mgr1.update_state("s_a", "FIGI_X", config_hash=HASH_A,
++                          data={"комментарий": "стратегия «Альфа»",
++                                "пусто": {}})
++        mgr2 = ss.StrategyStateManager(ss.StateStore(path=store_path))
++        restored = mgr2.get_state("s_a", "FIGI_X", config_hash=HASH_A)
++        assert restored.data["комментарий"] == "стратегия «Альфа»"
++        assert restored.data["пусто"] == {}
++        # Пустое состояние тоже персистентно: пустой data != отсутствие записи.
++        mgr2.get_state("s_b", "FIGI_Y", config_hash=HASH_B)
++        mgr2b = ss.StrategyStateManager(ss.StateStore(path=store_path))
++        assert dict(mgr2b.get_state("s_b", "FIGI_Y",
++                                    config_hash=HASH_B).data) == {}
++
++    def test_memory_mode_does_not_persist(self, tmp_path, monkeypatch):
++        monkeypatch.chdir(tmp_path)
++        mgr = ss.StrategyStateManager(ss.StateStore())
++        assert mgr._store.mode == "memory"
++        mgr.update_state("s_a", "FIGI_X", config_hash=HASH_A, data={"n": 1})
++        assert mgr.get_state("s_a", "FIGI_X",
++                             config_hash=HASH_A).data["n"] == 1
++        # Новый экземпляр memory-хранилища ничего не «восстанавливает»:
++        mgr2 = ss.StrategyStateManager(ss.StateStore())
++        st = mgr2.get_state("s_a", "FIGI_X", config_hash=HASH_A)
++        assert dict(st.data) == {}
++        assert list(os.listdir(tmp_path)) == []  # ни одного файла на диске
++
++
++# ---------------------------------------------------------------------------
++# ТЗ §4.6 — детерминированная сериализация
++# ---------------------------------------------------------------------------
++
++
++class TestDeterministicSerialization:
++    def test_same_content_same_bytes(self, store_path):
++        d1 = ss.StrategyState.create("s_a", "FIGI_X", HASH_A,
++                                     data={"b": 2, "a": [1, {"c": "x"}]},
++                                     now=STAMP_T1)
++        d2 = ss.StrategyState.create("s_a", "FIGI_X", HASH_A,
++                                     data={"a": [1, {"c": "x"}], "b": 2},
++                                     now=STAMP_T1)
++        assert d1.to_json() == d2.to_json()
++        assert d1.to_json() == d1.to_json()  # повторный вызов идентичен
++
++    def test_store_file_bytes_equal_state_json(self, store, store_path):
++        st = store.create_state("s_a", "FIGI_X", HASH_A,
++                                data={"z": 1, "a": {"m": [3, 1, 2]}},
++                                now=STAMP_T1)
++        with open(os.path.join(store_path, "s_a__FIGI_X.json"), "rb") as h:
++            file_bytes = h.read()
++        assert file_bytes == st.to_json().encode("utf-8")
++        # Каноничность: ключи отсортированы, без случайных пробелов.
++        text = file_bytes.decode("utf-8")
++        assert text == json.dumps(json.loads(text), sort_keys=True,
++                                  separators=(",", ":"),
++                                  ensure_ascii=False)
++
++    def test_two_stores_write_identical_bytes(self, tmp_path):
++        p1 = str(tmp_path / "one")
++        p2 = str(tmp_path / "two")
++        for p in (p1, p2):
++            s = ss.StateStore(path=p)
++            s.create_state("s_a", "FIGI_X", HASH_A,
++                           data={"streak": 2, "tags": ["x", "y"]},
++                           now=STAMP_T1)
++        b1 = open(os.path.join(p1, "s_a__FIGI_X.json"), "rb").read()
++        b2 = open(os.path.join(p2, "s_a__FIGI_X.json"), "rb").read()
++        assert b1 == b2
++
++    def test_json_round_trip_preserves_state(self):
++        st = ss.StrategyState.create(
++            "s_a", "FIGI_X", HASH_A,
++            data={"unicode": "стратегия «Альфа»", "nums": [1, 2.5, -3],
++                  "flags": {"on": True, "off": False}, "none": None},
++            now=STAMP_T1)
++        restored = ss.StrategyState.from_payload(
++            json.loads(st.to_json()))
++        assert restored == st
++        assert restored.to_json() == st.to_json()
++
++    def test_set_normalized_to_sorted_list_deterministically(self):
++        s1 = ss.StrategyState.create("s_a", "FIGI_X", HASH_A,
++                                     data={"tags": {"z", "a", "m"}},
++                                     now=STAMP_T1)
++        s2 = ss.StrategyState.create("s_a", "FIGI_X", HASH_A,
++                                     data={"tags": {"m", "z", "a"}},
++                                     now=STAMP_T1)
++        assert s1.to_json() == s2.to_json()
++        assert list(s1.data["tags"]) == ["a", "m", "z"]
++
++
++# ---------------------------------------------------------------------------
++# ТЗ §4.7 — повреждённая запись обнаруживается
++# ---------------------------------------------------------------------------
++
++
++class TestCorruptionDetection:
++    def _write_raw(self, store_path, sid, figi, text):
++        with open(os.path.join(
++                store_path, f"{sid}__{figi}.json"),
++                "w", encoding="utf-8") as handle:
++            handle.write(text)
++
++    def test_garbage_file_detected_not_replaced(self, store, store_path):
++        store.create_state("s_a", "FIGI_X", HASH_A, now=STAMP_T1)
++        self._write_raw(store_path, "s_a", "FIGI_X", "{broken json,,,")
++        with pytest.raises(ss.StateCorruptionError):
++            store.get_state("s_a", "FIGI_X", config_hash=HASH_A)
++        with pytest.raises(ss.StateCorruptionError):
++            store.list_states()
++        # Запись НЕ подменена пустым состоянием: файл остался повреждённым.
++        with open(os.path.join(store_path, "s_a__FIGI_X.json"),
++                  "r", encoding="utf-8") as handle:
++            assert handle.read() == "{broken json,,,"
++
++    def test_missing_fields_detected(self, store, store_path):
++        payload = ss.StrategyState.create(
++            "s_a", "FIGI_X", HASH_A, data={"n": 1},
++            now=STAMP_T1).to_payload()
++        broken = {k: v for k, v in payload.items() if k != "config_hash"}
++        self._write_raw(store_path, "s_a", "FIGI_X", json.dumps(broken))
++        with pytest.raises(ss.StateCorruptionError):
++            store.get_state("s_a", "FIGI_X", config_hash=HASH_A)
++
++    def test_wrong_field_types_detected(self, store, store_path):
++        payload = ss.StrategyState.create(
++            "s_a", "FIGI_X", HASH_A, now=STAMP_T1).to_payload()
++        payload["data"] = [1, 2, 3]  # data должен быть объектом
++        self._write_raw(store_path, "s_a", "FIGI_X", json.dumps(payload))
++        with pytest.raises(ss.StateCorruptionError):
++            store.get_state("s_a", "FIGI_X", config_hash=HASH_A)
++
++    def test_bad_hash_format_in_record_detected(self, store, store_path):
++        payload = ss.StrategyState.create(
++            "s_a", "FIGI_X", HASH_A, now=STAMP_T1).to_payload()
++        payload["config_hash"] = "не-хеш"
++        self._write_raw(store_path, "s_a", "FIGI_X", json.dumps(payload))
++        with pytest.raises(ss.StateValidationError):
++            store.get_state("s_a", "FIGI_X")
++
++    def test_manager_does_not_mask_corruption(self, manager, store_path):
++        manager.get_state("s_a", "FIGI_X", config_hash=HASH_A)
++        with open(os.path.join(store_path, "s_a__FIGI_X.json"),
++                  "w", encoding="utf-8") as handle:
++            handle.write("[]")
++        with pytest.raises(ss.StateCorruptionError):
++            manager.get_state("s_a", "FIGI_X", config_hash=HASH_A)
++        with pytest.raises(ss.StateCorruptionError):
++            manager.update_state("s_a", "FIGI_X", config_hash=HASH_A,
++                                 data={"n": 1})
++
++    def test_filename_content_mismatch_detected(self, store, store_path):
++        st = store.create_state("s_a", "FIGI_X", HASH_A, now=STAMP_T1)
++        payload = st.to_payload()
++        payload["figi"] = "FIGI_XX"  # содержимое другого ключа
++        with open(os.path.join(store_path, "s_a__FIGI_OTHER.json"),
++                  "w", encoding="utf-8") as handle:
++            json.dump(payload, handle)
++        with pytest.raises(ss.StateCorruptionError):
++            store.list_states()
++
++
++# ---------------------------------------------------------------------------
++# ТЗ §4.8 — неизвестная версия схемы отклоняется
++# ---------------------------------------------------------------------------
++
++
++class TestUnknownSchemaVersion:
++    def _payload_with_version(self, version):
++        payload = ss.StrategyState.create(
++            "s_a", "FIGI_X", HASH_A, data={"n": 1},
++            now=STAMP_T1).to_payload()
++        payload["schema_version"] = version
++        return payload
++
++    def test_future_version_rejected(self, store, store_path):
++        with open(os.path.join(store_path, "s_a__FIGI_X.json"),
++                  "w", encoding="utf-8") as handle:
++            json.dump(self._payload_with_version(999), handle)
++        with pytest.raises(ss.StateSchemaError):
++            store.get_state("s_a", "FIGI_X")
++        with pytest.raises(ss.StateSchemaError):
++            store.list_states()
++        with pytest.raises(ss.StateSchemaError):
++            ss.StrategyState.from_payload(self._payload_with_version(2))
++
++    def test_string_version_is_corruption(self, store, store_path):
++        with open(os.path.join(store_path, "s_a__FIGI_X.json"),
++                  "w", encoding="utf-8") as handle:
++            json.dump(self._payload_with_version("1"), handle)
++        with pytest.raises(ss.StateCorruptionError):
++            store.get_state("s_a", "FIGI_X")
++
++    def test_missing_version_is_corruption(self, store, store_path):
++        payload = self._payload_with_version(1)
++        del payload["schema_version"]
++        with open(os.path.join(store_path, "s_a__FIGI_X.json"),
++                  "w", encoding="utf-8") as handle:
++            json.dump(payload, handle)
++        with pytest.raises(ss.StateCorruptionError):
++            store.get_state("s_a", "FIGI_X")
++
++    def test_direct_constructor_rejects_wrong_version(self):
++        with pytest.raises(ss.StateSchemaError):
++            ss.StrategyState(
++                strategy_id="s_a", figi="FIGI_X", config_hash=HASH_A,
++                schema_version=2, created_at=STAMP_T1, updated_at=STAMP_T1)
++
++
++# ---------------------------------------------------------------------------
++# ТЗ §4.9 — несовпадающий config_hash отклоняется
++# ---------------------------------------------------------------------------
++
++
++class TestConfigHashMismatch:
++    def test_get_state_with_expected_hash_mismatch(self, manager):
++        manager.get_state("s_a", "FIGI_X", config_hash=HASH_A)
++        with pytest.raises(ss.StateConfigMismatchError):
++            manager.get_state("s_a", "FIGI_X", config_hash=HASH_B)
++
++    def test_get_state_with_config_object_mismatch(self, manager):
++        cfg_old = make_config(params={"length": 14})
++        cfg_new = make_config(params={"length": 21})
++        manager.get_state("s_a", "FIGI_X", config=cfg_old)
++        with pytest.raises(ss.StateConfigMismatchError):
++            manager.get_state("s_a", "FIGI_X", config=cfg_new)
++
++    def test_save_state_does_not_migrate_old_data_to_new_config(
++            self, store):
++        st_old = store.create_state("s_a", "FIGI_X", HASH_A, now=STAMP_T1)
++        evolved = st_old.with_data({"n": 1}, now=STAMP_T2)
++        with pytest.raises(ss.StateConfigMismatchError):
++            # Попытка записать данные старой конфигурации под новым хешем.
++            store.save_state("s_a", "FIGI_X", ss.StrategyState(
++                strategy_id="s_a", figi="FIGI_X", config_hash=HASH_B,
++                schema_version=ss.STATE_SCHEMA_VERSION,
++                data=evolved.data, created_at=STAMP_T1,
++                updated_at=STAMP_T2))
++        # Запись не изменена и не «перенесена».
++        current = store.get_state("s_a", "FIGI_X")
++        assert current.config_hash == HASH_A
++        assert dict(current.data) == {}
++
++    def test_mismatch_file_untouched(self, manager, store_path):
++        manager.get_state("s_a", "FIGI_X", config_hash=HASH_A)
++        before = open(os.path.join(store_path, "s_a__FIGI_X.json"),
++                      "rb").read()
++        with pytest.raises(ss.StateConfigMismatchError):
++            manager.get_state("s_a", "FIGI_X", config_hash=HASH_B)
++        after = open(os.path.join(store_path, "s_a__FIGI_X.json"),
++                     "rb").read()
++        assert before == after
++
++    def test_explicit_reset_is_the_controlled_solution(self, manager):
++        manager.get_state("s_a", "FIGI_X", config_hash=HASH_A)
++        with pytest.raises(ss.StateConfigMismatchError):
++            manager.get_state("s_a", "FIGI_X", config_hash=HASH_B)
++        assert manager.reset_state("s_a", "FIGI_X") is True
++        st = manager.get_state("s_a", "FIGI_X", config_hash=HASH_B)
++        assert st.config_hash == HASH_B
++        assert st.data == {}          # НОВОЕ пустое состояние после ЯВНОГО
++                                      # решения, а не перенос старого
++
++
++# ---------------------------------------------------------------------------
++# ТЗ §4.10 — отсутствие записи обрабатывается корректно
++# ---------------------------------------------------------------------------
++
++
++class TestMissingRecord:
++    def test_store_returns_none_for_missing(self, store):
++        assert store.get_state("s_a", "FIGI_X") is None
++
++    def test_manager_creates_fresh_independent_state(self, manager):
++        st = manager.get_state("s_a", "FIGI_X", config_hash=HASH_A)
++        assert st.strategy_id == "s_a" and st.figi == "FIGI_X"
++        assert st.config_hash == HASH_A
++        assert st.data == {}
++        assert st.created_at != "" and st.updated_at != ""
++        # Повторное получение возвращает ТУ ЖЕ запись, а не новую.
++        again = manager.get_state("s_a", "FIGI_X", config_hash=HASH_A)
++        assert again == st
++
++    def test_missing_then_created_then_missing_after_reset(self, manager):
++        manager.get_state("s_a", "FIGI_X", config_hash=HASH_A)
++        assert manager.reset_state("s_a", "FIGI_X") is True
++        assert manager._store.get_state("s_a", "FIGI_X") is None
++
++    def test_create_on_existing_fails_closed(self, store):
++        store.create_state("s_a", "FIGI_X", HASH_A, data={"n": 1})
++        with pytest.raises(ss.StateAlreadyExistsError):
++            store.create_state("s_a", "FIGI_X", HASH_A, data={"n": 2})
++        assert dict(store.get_state("s_a", "FIGI_X").data) == {"n": 1}
++
++    def test_save_state_on_missing_fails_closed(self, store):
++        st = ss.StrategyState.create("s_a", "FIGI_X", HASH_A, now=STAMP_T1)
++        with pytest.raises(ss.StateNotFoundError):
++            store.save_state("s_a", "FIGI_X", st)
++
++
++# ---------------------------------------------------------------------------
++# ТЗ §4.11 — явный reset затрагивает только выбранную пару
++# ---------------------------------------------------------------------------
++
++
++class TestExplicitResetScope:
++    def test_reset_only_selected_pair(self, manager, store_path):
++        for sid, figi in [("s_a", "FIGI_X"), ("s_a", "FIGI_Y"),
++                          ("s_b", "FIGI_X")]:
++            manager.update_state(sid, figi, config_hash=HASH_A,
++                                 data={"v": figi})
++        assert manager.reset_state("s_a", "FIGI_X") is True
++        files = sorted(os.listdir(store_path))
++        assert "s_a__FIGI_X.json" not in files
++        assert "s_a__FIGI_Y.json" in files
++        assert "s_b__FIGI_X.json" in files
++        assert manager.get_state("s_a", "FIGI_Y",
++                                 config_hash=HASH_A).data["v"] == "FIGI_Y"
++        assert manager.get_state("s_b", "FIGI_X",
++                                 config_hash=HASH_A).data["v"] == "FIGI_X"
++        # Повторный reset отсутствующей записи: False, без исключений.
++        assert manager.reset_state("s_a", "FIGI_X") is False
++
++    def test_reset_does_not_resurrect_old_data_with_same_config(
++            self, manager):
++        manager.update_state("s_a", "FIGI_X", config_hash=HASH_A,
++                             data={"n": 42})
++        manager.reset_state("s_a", "FIGI_X")
++        st = manager.get_state("s_a", "FIGI_X", config_hash=HASH_A)
++        assert dict(st.data) == {}  # прежние данные не «воскресли»
++
++
++# ---------------------------------------------------------------------------
++# ТЗ §4.12 — параллельные операции не приводят к перекрёстному загрязнению
++# ---------------------------------------------------------------------------
++
++
++class TestConcurrency:
++    def test_parallel_updates_of_distinct_pairs_are_isolated(self, manager):
++        pairs = [(f"s_{i}", f"FIGI_{i}") for i in range(8)]
++        for sid, figi in pairs:
++            manager.get_state(sid, figi, config_hash=HASH_A)
++
++        def worker(index):
++            sid, figi = pairs[index]
++            for step in range(25):
++                manager.update_state(
++                    sid, figi, config_hash=HASH_A,
++                    data={"owner": index, "step": step})
++                st = manager.get_state(sid, figi, config_hash=HASH_A)
++                # Чужие данные в моей паре — перекрёстное загрязнение.
++                assert st.data["owner"] == index
++                assert st.data["step"] in range(step + 1)
++
++        with ThreadPoolExecutor(max_workers=8) as pool:
++            list(pool.map(worker, range(8)))
++
++        for index, (sid, figi) in enumerate(pairs):
++            st = manager.get_state(sid, figi, config_hash=HASH_A)
++            assert st.data["owner"] == index
++            assert st.data["step"] == 24
++
++    def test_parallel_get_or_create_same_key_single_record(self, store):
++        def worker(_):
++            st = store.get_state("s_a", "FIGI_X", config_hash=HASH_A)
++            if st is not None:
++                return st
++            try:
++                # Хранилище атомарно по ОДНОЙ операции: составной
++                # get-or-create обрабатывает гонку ЯВНО (договорённость
++                # интерфейса); StrategyStateManager делает это внутренне.
++                return store.create_state("s_a", "FIGI_X", HASH_A)
++            except ss.StateAlreadyExistsError:
++                return store.get_state("s_a", "FIGI_X",
++                                       config_hash=HASH_A)
++
++        with ThreadPoolExecutor(max_workers=12) as pool:
++            results = list(pool.map(worker, range(12)))
++        # Все потоки получили одно и то же состояние; ошибок гонки наружу
++        # не вышло; запись создана ровно одна.
++        assert all(st.config_hash == HASH_A for st in results)
++        states = store.list_states()
++        assert len(states) == 1
++        assert states[0].key() == ("s_a", "FIGI_X")
++
++    def test_manager_get_or_create_race_is_handled_internally(self, manager):
++        # Менеджер сам обрабатывает гонку get/create: 16 потоков,
++        # ни одного исключения наружу, одна запись.
++        def worker(_):
++            return manager.get_state("s_race", "FIGI_R",
++                                     config_hash=HASH_A)
++
++        with ThreadPoolExecutor(max_workers=16) as pool:
++            results = list(pool.map(worker, range(16)))
++        assert len(results) == 16
++        assert all(st.key() == ("s_race", "FIGI_R") for st in results)
++        assert len(manager.list_states()) == 1
++
++    def test_parallel_updates_same_key_no_lost_update(self, manager):
++        manager.get_state("s_a", "FIGI_X", config_hash=HASH_A)
++
++        def increment(_):
++            def updater(current):
++                n = current.data.get("n", 0)
++                return {"n": n + 1}
++            manager.update_state("s_a", "FIGI_X", config_hash=HASH_A,
++                                 updater=updater)
++
++        with ThreadPoolExecutor(max_workers=10) as pool:
++            list(pool.map(increment, range(40)))
++        st = manager.get_state("s_a", "FIGI_X", config_hash=HASH_A)
++        assert st.data["n"] == 40  # ни одно обновление не потеряно
++
++    def test_parallel_mixed_operations_no_cross_contamination(self, manager):
++        pairs = [(f"s_{i}", f"FIGI_{i}") for i in range(6)]
++        for sid, figi in pairs:
++            manager.get_state(sid, figi, config_hash=HASH_A)
++
++        def mixed(task):
++            kind, index = task
++            sid, figi = pairs[index]
++            if kind == "update":
++                manager.update_state(sid, figi, config_hash=HASH_A,
++                                     data={"owner": index})
++            elif kind == "reset":
++                manager.reset_state(sid, figi)
++                manager.get_state(sid, figi, config_hash=HASH_A)
++            elif kind == "read":
++                st = manager.get_state(sid, figi, config_hash=HASH_A)
++                owner = st.data.get("owner", index)
++                assert owner == index
++
++        tasks = [(kind, i % 6)
++                 for i in range(60)
++                 for kind in ("update", "reset", "read")]
++        with ThreadPoolExecutor(max_workers=12) as pool:
++            list(pool.map(mixed, tasks))
++
++        for index, (sid, figi) in enumerate(pairs):
++            st = manager.get_state(sid, figi, config_hash=HASH_A)
++            assert st.data.get("owner", index) == index
++
++
++# ---------------------------------------------------------------------------
++# ТЗ §4.13 — изменение возвращённого объекта не меняет хранилище
++# ---------------------------------------------------------------------------
++
++
++class TestReturnedObjectIsolation:
++    def test_state_is_frozen(self, manager):
++        st = manager.get_state("s_a", "FIGI_X", config_hash=HASH_A)
++        with pytest.raises(Exception):
++            st.strategy_id = "s_hacked"
++        with pytest.raises(Exception):
++            st.config_hash = HASH_B
++
++    def test_data_mapping_is_immutable(self, manager):
++        manager.update_state("s_a", "FIGI_X", config_hash=HASH_A,
++                             data={"n": 1, "lst": [1, 2]})
++        st = manager.get_state("s_a", "FIGI_X", config_hash=HASH_A)
++        with pytest.raises(TypeError):
++            st.data["n"] = 999
++        with pytest.raises(TypeError):
++            st.data["new_key"] = "x"
++        with pytest.raises((TypeError, AttributeError)):
++            st.data["lst"].append(3)  # ImmutableList: tuple без append
++
++    def test_mutating_source_after_create_does_not_change_store(self, store):
++        source = {"n": 1, "nested": {"deep": [1, 2]}}
++        store.create_state("s_a", "FIGI_X", HASH_A, data=source)
++        source["n"] = 999
++        source["nested"]["deep"].append(3)
++        st = store.get_state("s_a", "FIGI_X")
++        assert st.data["n"] == 1
++        assert list(st.data["nested"]["deep"]) == [1, 2]
++
++    def test_updater_cannot_mutate_current_state_in_place(self, manager):
++        manager.update_state("s_a", "FIGI_X", config_hash=HASH_A,
++                             data={"n": 1})
++
++        def bad_updater(current):
++            try:
++                current.data["n"] = 999      # изменение состояния на месте
++            except TypeError:
++                pass                          # неизменяемость сработала
++            return {"n": current.data.get("n", 0) + 1}
++
++        new_state = manager.update_state("s_a", "FIGI_X",
++                                         config_hash=HASH_A,
++                                         updater=bad_updater)
++        assert new_state.data["n"] == 2
++        stored = manager.get_state("s_a", "FIGI_X", config_hash=HASH_A)
++        assert stored.data["n"] == 2
++
++    def test_to_payload_copies_do_not_affect_store(self, manager):
++        manager.update_state("s_a", "FIGI_X", config_hash=HASH_A,
++                             data={"n": 1, "lst": [1, 2]})
++        st = manager.get_state("s_a", "FIGI_X", config_hash=HASH_A)
++        payload = st.to_payload()
++        payload["data"]["n"] = 999
++        payload["data"]["lst"].append(3)
++        st_after = manager.get_state("s_a", "FIGI_X", config_hash=HASH_A)
++        assert st_after.data["n"] == 1
++        assert list(st_after.data["lst"]) == [1, 2]
++
++
++# ---------------------------------------------------------------------------
++# ТЗ §4.14 — записи Stage A и golden fixtures остаются совместимыми
++# ---------------------------------------------------------------------------
++
++
++class TestStageACompatibility:
++    PROTECTED = [
++        "engine.json",
++        "strategy_api.py",
++        "attribution.py",
++        "engine_config.py",
++        "strategies/legacy_samsung_v4/strategy.py",
++        "strategies/legacy_samsung_v4/params.json",
++        "strategies/legacy_samsung_v4/profiles.py",
++        "strategies/legacy_samsung_v4/schema.py",
++    ]
++
++    def test_stage_b_writes_only_into_explicit_store_path(
++            self, tmp_path, monkeypatch):
++        cwd_dir = str(tmp_path / "cwd")
++        store_dir = str(tmp_path / "explicit_store")
++        os.makedirs(cwd_dir, exist_ok=True)
++        monkeypatch.chdir(cwd_dir)
++        store = ss.StateStore(path=store_dir)
++        mgr = ss.StrategyStateManager(store)
++        mgr.update_state("s_a", "FIGI_X", config_hash=HASH_A,
++                         data={"n": 1})
++        mgr.list_states()
++        # В рабочей директории НЕ появилось ничего (ни state.json Samsung,
++        # ни «своего» файла по умолчанию); запись только по явному пути.
++        assert os.listdir(cwd_dir) == []
++        assert sorted(os.listdir(store_dir)) == ["s_a__FIGI_X.json"]
++
++    def test_stage_a_files_untouched_by_stage_b_operations(
++            self, store_path):
++        base = os.path.dirname(os.path.abspath(__file__))
++        root = os.path.dirname(base)  # candidate/
++        before = {rel: sha256_of(os.path.join(root, rel))
++                  for rel in self.PROTECTED}
++        store = ss.StateStore(path=store_path)
++        mgr = ss.StrategyStateManager(store)
++        mgr.update_state("s_a", "FIGI_X", config_hash=HASH_A, data={"n": 1})
++        mgr.reset_state("s_a", "FIGI_X")
++        mgr.list_states()
++        after = {rel: sha256_of(os.path.join(root, rel))
++                 for rel in self.PROTECTED}
++        assert before == after
++
++    def test_stage_a_attribution_contract_still_works(self, manager):
++        # config_hash Stage A не меняется: конфигурация строится тем же
++        # алгоритмом, контекст — тем же from_config (Stage A.2.1).
++        cfg = make_config(params={"length": 14})
++        ctx = AttributionContext.from_config(cfg)
++        assert ctx.strategy_id == cfg.strategy_id
++        assert ctx.config_hash == cfg.config_hash
++        st = manager.get_state_for_context(ctx, "FIGI_X")
++        assert st.strategy_id == cfg.strategy_id
++        assert st.config_hash == cfg.config_hash
++
++    def test_legacy_strategy_remains_regression_only(self):
++        from strategies.legacy_samsung_v4.strategy import (
++            LegacySamsungV4Strategy,
++        )
++        assert LegacySamsungV4Strategy.activation_mode \
++            == ActivationMode.REGRESSION_ONLY
++
++
++# ---------------------------------------------------------------------------
++# ТЗ §4.15 — невалидные strategy_id или FIGI отклоняются
++# ---------------------------------------------------------------------------
++
++
++class TestInvalidKeys:
++    BAD_KEYS = [
++        None, 123, "", "   ", "../escape", "a/b", "a\\b", "a\nb",
++        "..", ".", ".hidden", "a\x00b", "a b", "ключ-с-юникодом",
++        "a" * 129,
++    ]
++
++    @pytest.mark.parametrize("bad", BAD_KEYS)
++    def test_bad_strategy_id_rejected(self, store, bad):
++        with pytest.raises(ss.StateValidationError):
++            store.get_state(bad, "FIGI_X")
++        with pytest.raises(ss.StateValidationError):
++            store.create_state(bad, "FIGI_X", HASH_A)
++        with pytest.raises(ss.StateValidationError):
++            store.reset_state(bad, "FIGI_X")
++
++    @pytest.mark.parametrize("bad", BAD_KEYS)
++    def test_bad_figi_rejected(self, store, bad):
++        with pytest.raises(ss.StateValidationError):
++            store.get_state("s_a", bad)
++        with pytest.raises(ss.StateValidationError):
++            store.create_state("s_a", bad, HASH_A)
++        with pytest.raises(ss.StateValidationError):
++            store.reset_state("s_a", bad)
++
++    def test_manager_validates_keys_before_any_io(self, manager):
++        with pytest.raises(ss.StateValidationError):
++            manager.get_state("../evil", "FIGI_X", config_hash=HASH_A)
++        with pytest.raises(ss.StateValidationError):
++            manager.update_state("s_a", "a/b", config_hash=HASH_A,
++                                 data={"n": 1})
++
++    def test_no_file_created_for_invalid_keys(self, store_path):
++        store = ss.StateStore(path=store_path)
++        for bad in ["../escape", "a/b", ".hidden"]:
++            with pytest.raises(ss.StateValidationError):
++                store.get_state(bad, "FIGI_X")
++        assert os.listdir(store_path) == []
++
++    def test_figi_length_limit(self, store):
++        with pytest.raises(ss.StateValidationError):
++            store.get_state("s_a", "F" * 65)
++
++
++# ---------------------------------------------------------------------------
++# ТЗ §4.16 — отсутствие обязательной конфигурации persistent-хранилища
++# не приводит к скрытому переходу на другой путь
++# ---------------------------------------------------------------------------
++
++
++class TestNoHiddenPathFallback:
++    def test_missing_config_key_fails_closed(self):
++        with pytest.raises(ss.StateStoreConfigError):
++            ss.resolve_state_store_path({})
++
++    def test_none_value_fails_closed(self):
++        with pytest.raises(ss.StateStoreConfigError):
++            ss.resolve_state_store_path({ss.STATE_STORE_CONFIG_KEY: None})
++
++    def test_non_string_value_fails_closed(self):
++        for bad in (123, True, ["path"], {"p": 1}):
++            with pytest.raises(ss.StateStoreConfigError):
++                ss.resolve_state_store_path({ss.STATE_STORE_CONFIG_KEY: bad})
++
++    def test_empty_string_fails_closed(self):
++        for bad in ("", "   "):
++            with pytest.raises(ss.StateStoreConfigError):
++                ss.resolve_state_store_path({ss.STATE_STORE_CONFIG_KEY: bad})
++
++    def test_explicit_config_key_resolves_exactly(self):
++        assert ss.resolve_state_store_path(
++            {"STATE_STORE_PATH": "/explicit/path"}) == "/explicit/path"
++
++    def test_memory_mode_is_explicit_not_a_hidden_path(self, tmp_path,
++                                                       monkeypatch):
++        monkeypatch.chdir(tmp_path)
++        store = ss.StateStore()
++        assert store.mode == "memory"
++        assert store.path is None
++        store.create_state("s_a", "FIGI_X", HASH_A)
++        assert os.listdir(tmp_path) == []  # на диске ничего нет
++
++    def test_persistent_mode_requires_explicit_path(self):
++        # Единственный способ включить persistent-режим — ЯВНЫЙ path;
++        # путь по умолчанию в модуле не существует.
++        store = ss.StateStore()
++        assert store.mode == "memory"  # без path — только память
++        assert store.path is None
++        with pytest.raises(ss.StateStoreConfigError):
++            ss.StateStore(path="")
++        # Проверка «нет скрытого пути по умолчанию»: у модуля нет
++        # константы пути, хранилище без path ничего не пишет на диск.
++        assert not any(name.startswith("DEFAULT_") or "PATH" in name
++                       for name in dir(ss)
++                       if name.isupper() and name != "STATE_STORE_CONFIG_KEY")
++
++    def test_store_does_not_touch_old_samsung_files(self, tmp_path,
++                                                    monkeypatch):
++        # Имитация рабочего каталога Samsung: старые файлы присутствуют,
++        # StateStore не пишет в них и не читает их.
++        monkeypatch.chdir(tmp_path)
++        for name in ("state.json", "state.json.tmp",
++                     "research_events.jsonl", "orders_registry.json"):
++            with open(name, "w", encoding="utf-8") as handle:
++                handle.write("{}")
++        before = {name: sha256_of(name)
++                  for name in ("state.json", "research_events.jsonl",
++                               "orders_registry.json")}
++        store = ss.StateStore()  # memory-режим: явный, без пути
++        mgr = ss.StrategyStateManager(store)
++        mgr.update_state("s_a", "FIGI_X", config_hash=HASH_A, data={"n": 1})
++        persistent = ss.StateStore(path=str(tmp_path / "explicit_store"))
++        persistent.create_state("s_a", "FIGI_X", HASH_A)
++        after = {name: sha256_of(name)
++                 for name in ("state.json", "research_events.jsonl",
++                              "orders_registry.json")}
++        assert before == after
++        assert sorted(os.listdir(tmp_path)) == [
++            "explicit_store", "orders_registry.json", "research_events.jsonl",
++            "state.json", "state.json.tmp"]
++        assert sorted(os.listdir(
++            str(tmp_path / "explicit_store"))) == ["s_a__FIGI_X.json"]
++
++    def test_manager_requires_exact_state_store_type(self):
++        with pytest.raises(ss.StateStoreConfigError):
++            ss.StrategyStateManager(object())
++        with pytest.raises(ss.StateStoreConfigError):
++            ss.StrategyStateManager(None)
++
++
++# ---------------------------------------------------------------------------
++# Граничные случаи: менеджер, конфигурация, данные
++# ---------------------------------------------------------------------------
++
++
++class TestManagerConfigBinding:
++    def test_no_config_at_all_fails_closed(self, manager):
++        with pytest.raises(ss.StateValidationError):
++            manager.get_state("s_a", "FIGI_X")
++        with pytest.raises(ss.StateValidationError):
++            manager.update_state("s_a", "FIGI_X", data={"n": 1})
++
++    def test_exact_strategy_config_accepted(self, manager):
++        cfg = make_config()
++        st = manager.get_state("s_a", "FIGI_X", config=cfg)
++        assert st.config_hash == cfg.config_hash
++
++    def test_subclass_of_strategy_config_rejected(self, manager):
++        cfg = make_config()
++
++        class SubConfig(StrategyConfig):
++            pass
++
++        sub = SubConfig(
++            strategy_id=cfg.strategy_id,
++            strategy_version=cfg.strategy_version,
++            params=dict(cfg.params),
++            config_hash=cfg.config_hash,
++        )
++        with pytest.raises(ss.StateValidationError):
++            manager.get_state("s_a", "FIGI_X", config=sub)
++
++    def test_duck_typed_config_rejected(self, manager):
++        fake = type("Fake", (), {})()
++        fake.strategy_id = "s_a"
++        fake.config_hash = HASH_A
++        with pytest.raises(ss.StateValidationError):
++            manager.get_state("s_a", "FIGI_X", config=fake)
++
++    def test_config_of_other_strategy_rejected(self, manager):
++        cfg = make_config(strategy_id="s_other")
++        with pytest.raises(ss.StateValidationError):
++            manager.get_state("s_a", "FIGI_X", config=cfg)
++
++    def test_config_and_config_hash_contradiction_rejected(self, manager):
++        cfg = make_config(params={"length": 14})
++        with pytest.raises(ss.StateValidationError):
++            manager.get_state("s_a", "FIGI_X",
++                              config=cfg, config_hash=HASH_B)
++
++    def test_hash_only_path_also_works(self, manager):
++        st = manager.get_state("s_a", "FIGI_X", config_hash=HASH_A)
++        assert st.config_hash == HASH_A
++
++    def test_unverified_attribution_context_rejected(self, manager):
++        cfg = make_config()
++        with pytest.raises(Exception):
++            AttributionContext(cfg.strategy_id, cfg.config_hash)
++        # Проверенный контекст работает:
++        ctx = AttributionContext.from_config(cfg)
++        st = manager.get_state_for_context(ctx, "FIGI_X")
++        assert st.config_hash == cfg.config_hash
++        # Самодельный объект без маркера — отклоняется (Stage A.2.1).
++        with pytest.raises(Exception):
++            manager.get_state_for_context(object(), "FIGI_X")
++
++    def test_update_state_requires_exactly_one_data_source(self, manager):
++        with pytest.raises(ss.StateValidationError):
++            manager.update_state("s_a", "FIGI_X", config_hash=HASH_A)
++        with pytest.raises(ss.StateValidationError):
++            manager.update_state("s_a", "FIGI_X", config_hash=HASH_A,
++                                 data={"n": 1},
++                                 updater=lambda cur: {"n": 2})
++
++    def test_updater_failure_leaves_store_unchanged(self, manager):
++        manager.update_state("s_a", "FIGI_X", config_hash=HASH_A,
++                             data={"n": 1})
++
++        def failing_updater(current):
++            assert current.data["n"] == 1
++            raise RuntimeError("updater failed")
++
++        with pytest.raises(RuntimeError):
++            manager.update_state("s_a", "FIGI_X", config_hash=HASH_A,
++                                 updater=failing_updater)
++        st = manager.get_state("s_a", "FIGI_X", config_hash=HASH_A)
++        assert st.data["n"] == 1  # запись не изменена
++
++    def test_updater_returning_non_mapping_rejected(self, manager):
++        manager.get_state("s_a", "FIGI_X", config_hash=HASH_A)
++        with pytest.raises(ss.StateValidationError):
++            manager.update_state("s_a", "FIGI_X", config_hash=HASH_A,
++                                 updater=lambda cur: [1, 2])
++
++    def test_save_state_rejects_foreign_state_object(self, store):
++        st_a = store.create_state("s_a", "FIGI_X", HASH_A, now=STAMP_T1)
++        store.create_state("s_b", "FIGI_X", HASH_B, now=STAMP_T1)
++        # Запись пары A под ключом пары B — отклоняется.
++        with pytest.raises(ss.StateValidationError):
++            store.save_state("s_b", "FIGI_X", st_a)
++        # Не-StrategyState — отклоняется.
++        with pytest.raises(ss.StateValidationError):
++            store.save_state("s_a", "FIGI_X", {"data": {}})
++        # Подкласс StrategyState — отклоняется (точный тип).
++
++        class SubState(ss.StrategyState):
++            pass
++
++        sub = SubState(
++            strategy_id="s_a", figi="FIGI_X", config_hash=HASH_A,
++            schema_version=1, data={}, created_at=STAMP_T1,
++            updated_at=STAMP_T1)
++        with pytest.raises(ss.StateValidationError):
++            store.save_state("s_a", "FIGI_X", sub)
++
++    def test_data_validation_rejects_nan_and_objects(self, store):
++        with pytest.raises(ss.StateValidationError):
++            store.create_state("s_a", "FIGI_X", HASH_A,
++                               data={"x": float("nan")})
++        with pytest.raises(ss.StateValidationError):
++            store.create_state("s_a", "FIGI_X", HASH_A,
++                               data={"x": float("inf")})
++        with pytest.raises(ss.StateValidationError):
++            store.create_state("s_a", "FIGI_X", HASH_A,
++                               data={"x": object()})
++        with pytest.raises(ss.StateValidationError):
++            store.create_state("s_a", "FIGI_X", HASH_A,
++                               data={1: "не строковый ключ"})
++
++    def test_atomic_persistence_no_tmp_leftovers(self, manager, store_path):
++        for i in range(5):
++            manager.update_state("s_a", "FIGI_X", config_hash=HASH_A,
++                                 data={"n": i})
++        files = os.listdir(store_path)
++        assert files == ["s_a__FIGI_X.json"]
++
++    def test_store_creates_missing_directory(self, tmp_path):
++        nested = str(tmp_path / "deep" / "nested" / "store")
++        store = ss.StateStore(path=nested)
++        assert os.path.isdir(nested)
++        store.create_state("s_a", "FIGI_X", HASH_A)
++        assert store.get_state("s_a", "FIGI_X") is not None
++
++    def test_invalid_timestamps_rejected(self):
++        with pytest.raises(ss.StateValidationError):
++            ss.StrategyState.create("s_a", "FIGI_X", HASH_A,
++                                    now="не-время")
++        with pytest.raises(ss.StateValidationError):
++            ss.StrategyState.create("s_a", "FIGI_X", HASH_A,
++                                    now="2026-01-01T10:00:00")  # без зоны
++        payload = ss.StrategyState.create(
++            "s_a", "FIGI_X", HASH_A, now=STAMP_T1).to_payload()
++        payload["created_at"] = "мусор"
++        with pytest.raises(ss.StateValidationError):
++            ss.StrategyState.from_payload(payload)
++
++    def test_state_data_top_level_must_be_mapping(self, store):
++        with pytest.raises(ss.StateValidationError):
++            store.create_state("s_a", "FIGI_X", HASH_A, data=[1, 2, 3])
++
++    def test_with_data_creates_new_object_original_untouched(self, store):
++        st = store.create_state("s_a", "FIGI_X", HASH_A,
++                                data={"n": 1}, now=STAMP_T1)
++        evolved = st.with_data({"n": 2}, now=STAMP_T2)
++        assert st.data["n"] == 1
++        assert evolved.data["n"] == 2
++        assert evolved.created_at == st.created_at == STAMP_T1
++        assert evolved.updated_at == STAMP_T2
++        assert st.updated_at == STAMP_T1
++        assert evolved is not st
++
++    def test_persisted_file_matches_canonical_json_exactly(
++            self, store, store_path):
++        st = store.create_state("s_a", "FIGI_X", HASH_A,
++                                data={"b": 1, "a": 2}, now=STAMP_T1)
++        with open(os.path.join(store_path, "s_a__FIGI_X.json"),
++                  "r", encoding="utf-8") as handle:
++            raw = handle.read()
++        assert raw == st.to_json()
++        assert raw.startswith('{"config_hash"')  # sort_keys: a<...<z
++        parsed = json.loads(raw)
++        assert parsed["data"] == {"a": 2, "b": 1}

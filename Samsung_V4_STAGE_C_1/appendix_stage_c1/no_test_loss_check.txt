@@ -1,0 +1,11 @@
+[FULL] before PASSED: 1384
+[FULL] after  PASSED: 1391
+[FULL] lost old tests: 0
+[FULL] added tests: 7
+
+[CANONICAL] before PASSED: 864
+[CANONICAL] after  PASSED: 871
+[CANONICAL] lost old tests: 0
+[CANONICAL] added tests: 7
+
+RESULT: OK — ни один старый тест не потерян/не ослаблен; дельта ровно 7 новых тестов Stage C.1

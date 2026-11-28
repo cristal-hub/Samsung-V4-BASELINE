@@ -1,0 +1,102 @@
+============================= test session starts ==============================
+platform linux -- Python 3.12.16, pytest-9.0.2, pluggy-1.6.0 -- /home/z/.venv/bin/python
+metadata: {'Python': '3.12.16', 'Platform': 'Linux-5.10.134-013.15.kangaroo.al8.x86_64-x86_64-with-glibc2.41', 'Packages': {'pytest': '9.0.2', 'pluggy': '1.6.0'}, 'Plugins': {'Faker': '40.1.2', 'metadata': '3.1.1', 'asyncio': '1.3.0', 'ddtrace': '4.2.2', 'cov': '7.0.0', 'json-report': '1.5.0', 'anyio': '4.13.0'}}
+rootdir: /tmp/c1_negative/Samsung_V4_STAGE_C/candidate
+plugins: Faker-40.1.2, metadata-3.1.1, asyncio-1.3.0, ddtrace-4.2.2, cov-7.0.0, json-report-1.5.0, anyio-4.13.0
+asyncio: mode=Mode.STRICT, debug=False, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
+collecting ... collected 7 items
+
+tests/test_stage_c_exit_service.py::TestPriceGateBeforeStateAccess::test_missing_price_missing_record_no_state_created FAILED [ 14%]
+tests/test_stage_c_exit_service.py::TestPriceGateBeforeStateAccess::test_stale_price_missing_record_no_state_created FAILED [ 28%]
+tests/test_stage_c_exit_service.py::TestPriceGateBeforeStateAccess::test_foreign_figi_price_missing_record_no_state_created FAILED [ 42%]
+tests/test_stage_c_exit_service.py::TestPriceGateBeforeStateAccess::test_missing_price_existing_record_untouched PASSED [ 57%]
+tests/test_stage_c_exit_service.py::TestPriceGateBeforeStateAccess::test_stale_price_existing_record_untouched PASSED [ 71%]
+tests/test_stage_c_exit_service.py::TestPriceGateBeforeStateAccess::test_price_not_required_none_price_evaluators_called PASSED [ 85%]
+tests/test_stage_c_exit_service.py::TestPriceGateBeforeStateAccess::test_valid_price_state_obtained_and_updated_per_stage_c_rules PASSED [100%]
+
+=================================== FAILURES ===================================
+_ TestPriceGateBeforeStateAccess.test_missing_price_missing_record_no_state_created _
+
+self = <candidate.tests.test_stage_c_exit_service.TestPriceGateBeforeStateAccess object at 0x7f81d641fa70>
+tmp_path = PosixPath('/tmp/pytest-of-z/pytest-35/test_missing_price_missing_rec0')
+
+    def test_missing_price_missing_record_no_state_created(self, tmp_path):
+        """Сценарий 1: цена отсутствует + записи нет.
+    
+        INCOMPLETE_PRICE_EVALUATION; оба оценщика не вызваны;
+        StateStore.get_state(...) возвращает None; файл состояния
+        НЕ создан."""
+        store = StateStore(path=str(tmp_path))
+        manager = StrategyStateManager(store)
+        config = make_config()
+        coordinator, strategic, protective = make_coord(manager)
+        report = run(coordinator, config, price=None)
+        assert report.merged.final_outcome is \
+            ExitMergeOutcome.INCOMPLETE_PRICE_EVALUATION
+        assert report.merged.reason_code == "PRICE_MISSING"
+        assert report.strategic_result is None
+        assert report.protective_result is None
+        assert strategic.calls == 0 and protective.calls == 0
+        assert report.state_updated is False
+        # Публичный StateStore.get_state(): записи НЕТ.
+>       assert store.get_state("alpha", "FIGI1") is None
+E       AssertionError: assert StrategyState(strategy_id='alpha', figi='FIGI1', config_hash='89c33dcb696dd1842e2cc1713fa32bab858b559675314f7e1cef5df4bf7bff61', schema_version=1, data=ImmutableMapping({}), created_at='2026-11-28T07:50:20.952233Z', updated_at='2026-11-28T07:50:20.952233Z') is None
+E        +  where StrategyState(strategy_id='alpha', figi='FIGI1', config_hash='89c33dcb696dd1842e2cc1713fa32bab858b559675314f7e1cef5df4bf7bff61', schema_version=1, data=ImmutableMapping({}), created_at='2026-11-28T07:50:20.952233Z', updated_at='2026-11-28T07:50:20.952233Z') = get_state('alpha', 'FIGI1')
+E        +    where get_state = <strategy_state.StateStore object at 0x7f81d61294f0>.get_state
+
+tests/test_stage_c_exit_service.py:739: AssertionError
+_ TestPriceGateBeforeStateAccess.test_stale_price_missing_record_no_state_created _
+
+self = <candidate.tests.test_stage_c_exit_service.TestPriceGateBeforeStateAccess object at 0x7f81d6167c20>
+tmp_path = PosixPath('/tmp/pytest-of-z/pytest-35/test_stale_price_missing_recor0')
+
+    def test_stale_price_missing_record_no_state_created(self, tmp_path):
+        """Сценарий 2: устаревшая цена + записи нет — те же проверки,
+        никаких новых файлов состояния."""
+        store = StateStore(path=str(tmp_path))
+        manager = StrategyStateManager(store)
+        config = make_config()
+        coordinator, strategic, protective = make_coord(manager)
+        stale = make_price(offset_seconds=-600.0)
+        report = run(coordinator, config, price=stale, max_age=120.0)
+        assert report.merged.final_outcome is \
+            ExitMergeOutcome.INCOMPLETE_PRICE_EVALUATION
+        assert report.merged.reason_code == "PRICE_STALE"
+        assert strategic.calls == 0 and protective.calls == 0
+        assert report.state_updated is False
+>       assert store.get_state("alpha", "FIGI1") is None
+E       AssertionError: assert StrategyState(strategy_id='alpha', figi='FIGI1', config_hash='89c33dcb696dd1842e2cc1713fa32bab858b559675314f7e1cef5df4bf7bff61', schema_version=1, data=ImmutableMapping({}), created_at='2026-11-28T07:50:21.001127Z', updated_at='2026-11-28T07:50:21.001127Z') is None
+E        +  where StrategyState(strategy_id='alpha', figi='FIGI1', config_hash='89c33dcb696dd1842e2cc1713fa32bab858b559675314f7e1cef5df4bf7bff61', schema_version=1, data=ImmutableMapping({}), created_at='2026-11-28T07:50:21.001127Z', updated_at='2026-11-28T07:50:21.001127Z') = get_state('alpha', 'FIGI1')
+E        +    where get_state = <strategy_state.StateStore object at 0x7f81c111d640>.get_state
+
+tests/test_stage_c_exit_service.py:757: AssertionError
+_ TestPriceGateBeforeStateAccess.test_foreign_figi_price_missing_record_no_state_created _
+
+self = <candidate.tests.test_stage_c_exit_service.TestPriceGateBeforeStateAccess object at 0x7f81d61644a0>
+tmp_path = PosixPath('/tmp/pytest-of-z/pytest-35/test_foreign_figi_price_missin0')
+
+    def test_foreign_figi_price_missing_record_no_state_created(
+            self, tmp_path):
+        """Сценарий 3: чужой FIGI у цены + записи нет — те же проверки."""
+        store = StateStore(path=str(tmp_path))
+        manager = StrategyStateManager(store)
+        config = make_config()
+        coordinator, strategic, protective = make_coord(manager)
+        foreign = make_price(figi="OTHER")
+        report = run(coordinator, config, price=foreign)
+        assert report.merged.final_outcome is \
+            ExitMergeOutcome.INCOMPLETE_PRICE_EVALUATION
+        assert report.merged.reason_code == "PRICE_FOREIGN_FIGI"
+        assert strategic.calls == 0 and protective.calls == 0
+        assert report.state_updated is False
+>       assert store.get_state("alpha", "FIGI1") is None
+E       AssertionError: assert StrategyState(strategy_id='alpha', figi='FIGI1', config_hash='89c33dcb696dd1842e2cc1713fa32bab858b559675314f7e1cef5df4bf7bff61', schema_version=1, data=ImmutableMapping({}), created_at='2026-11-28T07:50:21.015557Z', updated_at='2026-11-28T07:50:21.015557Z') is None
+E        +  where StrategyState(strategy_id='alpha', figi='FIGI1', config_hash='89c33dcb696dd1842e2cc1713fa32bab858b559675314f7e1cef5df4bf7bff61', schema_version=1, data=ImmutableMapping({}), created_at='2026-11-28T07:50:21.015557Z', updated_at='2026-11-28T07:50:21.015557Z') = get_state('alpha', 'FIGI1')
+E        +    where get_state = <strategy_state.StateStore object at 0x7f81c11243b0>.get_state
+
+tests/test_stage_c_exit_service.py:774: AssertionError
+=========================== short test summary info ============================
+FAILED tests/test_stage_c_exit_service.py::TestPriceGateBeforeStateAccess::test_missing_price_missing_record_no_state_created
+FAILED tests/test_stage_c_exit_service.py::TestPriceGateBeforeStateAccess::test_stale_price_missing_record_no_state_created
+FAILED tests/test_stage_c_exit_service.py::TestPriceGateBeforeStateAccess::test_foreign_figi_price_missing_record_no_state_created
+========================= 3 failed, 4 passed in 0.29s ==========================

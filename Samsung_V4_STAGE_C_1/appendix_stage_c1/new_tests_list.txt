@@ -1,0 +1,14 @@
+СПИСОК НОВЫХ ТЕСТОВ STAGE C.1 (из реального лога pytest after full)
+========================================================================
+
+### tests/test_stage_c_exit_service.py — класс TestPriceGateBeforeStateAccess — 7 тестов
+tests/test_stage_c_exit_service.py::TestPriceGateBeforeStateAccess::test_missing_price_missing_record_no_state_created PASSED [ 95%]
+tests/test_stage_c_exit_service.py::TestPriceGateBeforeStateAccess::test_stale_price_missing_record_no_state_created PASSED [ 95%]
+tests/test_stage_c_exit_service.py::TestPriceGateBeforeStateAccess::test_foreign_figi_price_missing_record_no_state_created PASSED [ 95%]
+tests/test_stage_c_exit_service.py::TestPriceGateBeforeStateAccess::test_missing_price_existing_record_untouched PASSED [ 95%]
+tests/test_stage_c_exit_service.py::TestPriceGateBeforeStateAccess::test_stale_price_existing_record_untouched PASSED [ 95%]
+tests/test_stage_c_exit_service.py::TestPriceGateBeforeStateAccess::test_price_not_required_none_price_evaluators_called PASSED [ 95%]
+tests/test_stage_c_exit_service.py::TestPriceGateBeforeStateAccess::test_valid_price_state_obtained_and_updated_per_stage_c_rules PASSED [ 95%]
+
+Всего новых тестов Stage C.1: 7
+Сценарии ТЗ Stage C.1 §4: 1-3 (блокирующая цена + отсутствующая запись), 4-5 (блокирующая цена + существующая запись), 6 (price_required=False + price=None), 7 (валидная цена).
