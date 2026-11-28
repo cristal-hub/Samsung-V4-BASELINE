@@ -1,0 +1,73 @@
+{
+  "_comment": "G-1 golden signals: ожидаемые (signal, reason) ОРИГИНАЛЬНОЙ логики baseline strategy.py на детерминированных fixture, снятые через regression-адаптер Stage A. Тест пересчитывает и сравнивает. Не редактировать вручную.",
+  "expectations": {
+    "A_long_rise_reversal::CONSERVATIVE": {
+      "reason": "MA↓, но фильтр MA100 не пройден",
+      "signal": "HOLD"
+    },
+    "A_long_rise_reversal::SANDBOX_TEST": {
+      "reason": "MA(5/13) ↓",
+      "signal": "SELL"
+    },
+    "A_long_rise_reversal::TECH_CHECK": {
+      "reason": "MA↓, но фильтр MA100 не пройден",
+      "signal": "HOLD"
+    },
+    "B_rise_dip_reversal::CONSERVATIVE": {
+      "reason": "Нет пересечения MA",
+      "signal": "HOLD"
+    },
+    "B_rise_dip_reversal::SANDBOX_TEST": {
+      "reason": "MA(5/13) ↑",
+      "signal": "BUY"
+    },
+    "B_rise_dip_reversal::TECH_CHECK": {
+      "reason": "Нет пересечения MA",
+      "signal": "HOLD"
+    },
+    "C_range_oversold::CONSERVATIVE": {
+      "reason": "Нет сигнала BB+RSI",
+      "signal": "HOLD"
+    },
+    "C_range_oversold::SANDBOX_TEST": {
+      "reason": "Нет пересечения MA",
+      "signal": "HOLD"
+    },
+    "C_range_oversold::TECH_CHECK": {
+      "reason": "Нет пересечения MA",
+      "signal": "HOLD"
+    },
+    "D_short_history::CONSERVATIVE": {
+      "reason": "Недостаточно данных",
+      "signal": "HOLD"
+    },
+    "D_short_history::SANDBOX_TEST": {
+      "reason": "Недостаточно данных",
+      "signal": "HOLD"
+    },
+    "D_short_history::TECH_CHECK": {
+      "reason": "Недостаточно данных",
+      "signal": "HOLD"
+    },
+    "E_incomplete_last::CONSERVATIVE": {
+      "reason": "BB↓ RSI=25.7, фильтр MA100 не пройден",
+      "signal": "HOLD"
+    },
+    "E_incomplete_last::SANDBOX_TEST": {
+      "reason": "Нет пересечения MA",
+      "signal": "HOLD"
+    },
+    "E_incomplete_last::TECH_CHECK": {
+      "reason": "BB↓ RSI=25.7, фильтр MA100 не пройден",
+      "signal": "HOLD"
+    }
+  },
+  "fixture_sha256": {
+    "A_long_rise_reversal": "09ebc43aacc82d4a00240fa2cb2d42f8a10b0c0d085332d51737692190828ee2",
+    "B_rise_dip_reversal": "3bf2e3a6853f4c1cb0118451847dc6d842a937ef289b35ea8ba8ec97eca4ea22",
+    "C_range_oversold": "0838a02d084aacae687335f8209eedddd673de503a887fea575719359a354683",
+    "D_short_history": "e3d55a62a52638e5902648c92603c481980e727201fc3cfd4216f44a4517a149",
+    "E_incomplete_last": "d7da7734211a157c24b8ed2ccdec2cfe1d3df03ad8d4dc8a215efa2a4218c535"
+  },
+  "generator": "regression adapter -> baseline strategy.py"
+}
