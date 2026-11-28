@@ -1,0 +1,19 @@
+STAGE E.1 — ПРОВЕРКА ОТСУТСТВИЯ BROKER SDK И СЕТЕВЫХ ВЫЗОВОВ
+=============================================================
+
+Статический скан всех файлов Stage E/E.1 (historical_engine/*,
+tests/test_stage_e*, tests/stage_e_tools.py) на запретные маркеры:
+брокерские SDK (t_tech/tinkoff), сетевые библиотеки (requests,
+urllib, socket, grpc, aiohttp, websocket, httpx, http.client),
+Telegram, FORCE_TRADE, размещение заявок, системное время
+(datetime.now/utcnow, time.time/monotonic), случайность (random,
+uuid4), доступ к окружению (os.environ), subprocess.
+
+Допустимые datetime-использования: только детерминированные метки
+свечей и сессий календаря.
+
+=== NO-BROKER / NO-NETWORK SCAN (Stage E/E.1 files) ===
+Files scanned: 20; violations: 0
+Result: CLEAN — OK
+
+EXIT CODE: 0

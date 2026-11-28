@@ -1,0 +1,37 @@
+STAGE E.1 — ДОКАЗАТЕЛЬСТВО НЕИЗМЕННОСТИ STAGE A–D
+==================================================
+
+Метод: байт-в-байт сравнение (SHA-256) всего дерева candidate с
+принятым Stage E; исключение — РАЗРЕШЁННЫЙ набор Stage E/E.1:
+  * historical_engine/*  (модули Stage E — зона правок E.1);
+  * tests/test_stage_e*  (тесты Stage E — зона новых тестов E.1);
+  * tests/stage_e_tools.py (тестовая инфраструктура Stage E).
+Все остальные файлы (Stage A–D, legacy, контракты, конфигурации,
+golden fixtures) совпадают байт-в-байт: 179 файлов, 0 нарушений.
+
+=== STAGE E.1 TREE DIFF (pristine Stage E -> working E.1) ===
+MODIFIED: 7
+  M historical_engine/__init__.py
+  M historical_engine/data_feed.py
+  M historical_engine/engine.py
+  M historical_engine/execution.py
+  M historical_engine/ledger.py
+  M historical_engine/models.py
+  M historical_engine/report.py
+ADDED: 4
+  A historical_engine/calendar.py
+  A tests/test_stage_e1_calendar.py
+  A tests/test_stage_e1_config_consistency.py
+  A tests/test_stage_e1_slippage.py
+DELETED: 0
+UNEXPECTED (outside allowed set): 0
+
+=== STAGE A–D IMMUTABILITY ===
+Stage A–D files checked: 179; violations: 0
+Result: ZERO CHANGES — OK
+
+=== NO-BROKER / NO-NETWORK SCAN (Stage E/E.1 files) ===
+Files scanned: 20; violations: 0
+Result: CLEAN — OK
+
+EXIT CODE: 0
