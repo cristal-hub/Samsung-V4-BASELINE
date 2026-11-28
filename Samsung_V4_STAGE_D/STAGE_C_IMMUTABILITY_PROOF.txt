@@ -1,0 +1,35 @@
+STAGE C — ПОЛНАЯ ПОБАЙТОВАЯ СВЕРКА ПАКЕТА С ПРИНЯТЫМ ZIP STAGE B.1
+========================================================================
+
+Файлов в принятом ZIP Stage B.1: 223
+Побайтово совпадают: 223
+Изменены: 0
+Отсутствуют: 0
+Добавлены Stage C: 23
+
+ИЗМЕНЁННЫЕ ФАЙЛЫ (должно быть пусто):
+ОТСУТСТВУЮЩИЕ ФАЙЛЫ (должно быть пусто):
+ДОБАВЛЕННЫЕ ФАЙЛЫ STAGE C:
+  CHANGED_FILES_STAGE_C.md
+  DIFF_STAGE_B_1_VS_C.md
+  DIFF_STAGE_B_1_VS_C.patch
+  IMPLEMENTATION_REPORT_STAGE_C.md
+  KNOWN_LIMITATIONS_STAGE_C.md
+  README_STAGE_C.md
+  ROLLBACK_INSTRUCTIONS_STAGE_C.md
+  STAGE_C_ARCHITECTURE_REPORT.md
+  STAGE_C_IMMUTABILITY_PROOF.txt
+  STAGE_C_NO_EXECUTION_CHANGES_PROOF.md
+  STAGE_C_PRE_BASELINE_FILES.txt
+  STAGE_C_PRE_BASELINE_SHA256.txt
+  STAGE_C_PRE_IMPLEMENTATION_BASELINE.md
+  TEST_RESULTS_STAGE_C.txt
+  VERIFICATION_INSTRUCTIONS_STAGE_C.md
+  appendix_stage_c/new_tests_list.txt
+  appendix_stage_c/pytest_after_canonical.log
+  appendix_stage_c/pytest_after_full.log
+  appendix_stage_c/pytest_before_canonical.log
+  appendix_stage_c/pytest_before_full.log
+  candidate/strategy_contracts.py
+  candidate/tests/test_stage_c_contracts.py
+  candidate/tests/test_stage_c_exit_service.py

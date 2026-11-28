@@ -1,0 +1,141 @@
+================================================================================
+TEST_RESULTS_STAGE_C1.txt — STAGE C.1
+SAMSUNG V4 — NEW STRATEGY ENGINE. STAGE C.1:
+PRICE GATE BEFORE STATE ACCESS (исправление дефекта порядка операций)
+Дата прогона: 2026-11-28
+База: Stage C candidate (commit 9a69a300e6759f9264d5feb1a6b54ea80f615e4a),
+побайтово = доставленный пакет (246/246 manifest OK)
+Принятые неизменяемые ссылки (побайтово не изменены):
+  Baseline: commit 884cefd6f12a99f6adc14b5ed4c9eeda21d32e04
+  Accepted Stage A.2.1: commit 103d22d34d483fbb7179d1fef07dd0e24b51dfcd
+  Accepted Stage B.1: commit e413c5bd6bdec436ffd7aeece4c28b5e969c6306
+Режим: ТОЛЬКО offline — READ ONLY DATA / RESEARCH ONLY / OFFLINE TESTS
+ONLY / NO LIVE ORDERS / NO REAL MONEY. Без сети, без брокера, без
+Sandbox/LIVE-заявок.
+Окружение: Python 3.12.16, pytest 9.0.2, pandas 2.2.3,
+pandas-ta-classic 0.9.0.
+================================================================================
+
+0. СВОДКА ДО / ПОСЛЕ (ТЗ Stage C.1 §6 — полный лог pytest до и после)
+--------------------------------------------------------------------------------
+Прогон «ДО Stage C.1» (кандидат Stage C БЕЗ изменений; ожидание ТЗ §6:
+полный 1384 passed, канонический 864 passed — подтверждено):
+
+  python -m pytest       (полный набор):      ============================ 1384 passed in 21.53s =============================
+  python -m pytest tests (канонический набор):  ============================= 864 passed in 10.40s =============================
+
+Прогон «ПОСЛЕ Stage C.1» (Stage C + правка порядка в
+candidate/strategy_contracts.py + 7 новых тестов в
+candidate/tests/test_stage_c_exit_service.py):
+
+  python -m pytest       (полный набор):      ============================ 1391 passed in 23.07s =============================
+  python -m pytest tests (канонический набор):  ============================= 871 passed in 11.06s =============================
+
+Разница: +7 новых тестов Stage C.1 (класс TestPriceGateBeforeStateAccess).
+Ни один старый тест не удалён, не пропущен и не ослаблен
+(appendix_stage_c1/no_test_loss_check.txt: 0 lost, +7 added в обоих
+наборах; дельта совпадает со списком новых тестов). Golden fixtures не
+перегенерированы: candidate/tests/fixtures/legacy_golden_signals.json
+побайтово неизменен (STAGE_C1_IMMUTABILITY_PROOF.txt).
+
+Полные логи (реальный вывод pytest):
+  appendix_stage_c1/pytest_before_full.log          — ДО, полный набор
+  appendix_stage_c1/pytest_before_canonical.log     — ДО, канонический
+  appendix_stage_c1/pytest_after_full.log           — ПОСЛЕ, полный набор
+  appendix_stage_c1/pytest_after_canonical.log      — ПОСЛЕ, канонический
+
+Negative-check (тесты C.1 против ДО-исправного кода Stage C; сценарии
+1-3 ДОЛЖНЫ падать — они ловят дефект): ========================= 3 failed, 4 passed in 0.29s ==========================
+  appendix_stage_c1/negative_check_pre_fix.log
+
+Список всех новых тестов: appendix_stage_c1/new_tests_list.txt
+
+--------------------------------------------------------------------------------
+
+1. ПОКРЫТИЕ ОБЯЗАТЕЛЬНЫХ СЦЕНАРИЕВ ТЗ STAGE C.1 §4
+--------------------------------------------------------------------------------
+Каждый сценарий проверяет ФАКТИЧЕСКОЕ состояние StateStore (публичный
+StateStore.get_state(), файлы persistent-хранилища, полный to_json()
+включая updated_at), а НЕ только report.state_updated.
+
+Сценарий 1: Missing price + отсутствующая запись: INCOMPLETE_PRICE_EVALUATION; оба оценщика не вызваны; StateStore.get_state(...) -> None; файл состояния НЕ создан
+    Тест: tests/test_stage_c_exit_service.py::TestPriceGateBeforeStateAccess::test_missing_price_missing_record_no_state_created
+    Статус: PASSED after; FAILED pre-fix (ловит дефект)
+
+Сценарий 2: Stale price + отсутствующая запись: те же проверки; никаких новых файлов состояния
+    Тест: tests/test_stage_c_exit_service.py::TestPriceGateBeforeStateAccess::test_stale_price_missing_record_no_state_created
+    Статус: PASSED after; FAILED pre-fix (ловит дефект)
+
+Сценарий 3: Foreign FIGI price + отсутствующая запись: те же проверки
+    Тест: tests/test_stage_c_exit_service.py::TestPriceGateBeforeStateAccess::test_foreign_figi_price_missing_record_no_state_created
+    Статус: PASSED after; FAILED pre-fix (ловит дефект)
+
+Сценарий 4: Missing price + существующая запись: to_json() полностью совпадает; updated_at не изменился; данные не изменились (файл побайтово тот же)
+    Тест: tests/test_stage_c_exit_service.py::TestPriceGateBeforeStateAccess::test_missing_price_existing_record_untouched
+    Статус: PASSED after
+
+Сценарий 5: Stale price + существующая запись: те же проверки
+    Тест: tests/test_stage_c_exit_service.py::TestPriceGateBeforeStateAccess::test_stale_price_existing_record_untouched
+    Статус: PASSED after
+
+Сценарий 6: price_required=False + price=None: оценщики вызываются; штатное поведение Stage C сохранено (NO_EXIT записан)
+    Тест: tests/test_stage_c_exit_service.py::TestPriceGateBeforeStateAccess::test_price_not_required_none_price_evaluators_called
+    Статус: PASSED after
+
+Сценарий 7: Валидная цена: состояние получается штатно; оценщики вызываются; существующая запись обновляется только по правилам Stage C (last_exit_evaluation добавлен, данные сохранены)
+    Тест: tests/test_stage_c_exit_service.py::TestPriceGateBeforeStateAccess::test_valid_price_state_obtained_and_updated_per_stage_c_rules
+    Статус: PASSED after
+
+--------------------------------------------------------------------------------
+
+2. СОХРАНЕНИЕ ПРЕДЫДУЩИХ ТЕСТОВ И РЕГРЕССИЯ (ТЗ Stage C.1 §6)
+--------------------------------------------------------------------------------
+Проверка отсутствия потерь/ослаблений (реальное сравнение PASSED-наборов
+ДО и ПОСЛЕ по обоим прогонам):
+
+[FULL] before PASSED: 1384
+[FULL] after  PASSED: 1391
+[FULL] lost old tests: 0
+[FULL] added tests: 7
+
+[CANONICAL] before PASSED: 864
+[CANONICAL] after  PASSED: 871
+[CANONICAL] lost old tests: 0
+[CANONICAL] added tests: 7
+
+RESULT: OK — ни один старый тест не потерян/не ослаблен; дельта ровно 7 новых тестов Stage C.1
+
+Покрытие обязательных сценариев ТЗ Stage C §6 (123 теста Stage C:
+§6.1-§6.17) полностью сохранено; все тесты Stage A/A.1/A.2/A.2.1/B/B.1
+и канонический набор пройдут без failed/skipped.
+
+--------------------------------------------------------------------------------
+
+3. ИНВАРИАНТЫ, ПРОВЕРЕННЫЕ НОВЫМИ ТЕСТАМИ (помимо §4)
+--------------------------------------------------------------------------------
+* при блокирующей цене manager.get_state НЕ вызывается: отсутствующая
+  запись не создаётся (проверка store.get_state(...) is None и
+  отсутствия *.json в persistent-хранилище);
+* при блокирующей цене существующая запись побайтово неизменна
+  (to_json() до == после, updated_at тот же, файл на диске тот же);
+* price_required=False + price=None сохраняет штатный цикл Stage C
+  (оценщики вызваны, NO_EXIT записан атомарным API Stage B.1);
+* валидная цена сохраняет штатный цикл Stage C: last_exit_evaluation
+  добавлен, существующие данные записи не потеряны.
+
+--------------------------------------------------------------------------------
+
+4. ГРАНИЦЫ ИЗМЕНЕНИЙ (ТЗ §5) — СОБЛЮДЕНЫ
+--------------------------------------------------------------------------------
+* изменены ровно 2 разрешённых файла (см. CHANGED_FILES_STAGE_C1.md);
+* Stage A.2.1 / Stage B.1 (strategy_state.py) / старые тесты Stage A/B/
+  B.1 / runtime-файлы / execution.py / risk_manager.py / main.py /
+  legacy_samsung_v4 — побайтово неизменны (STAGE_C1_IMMUTABILITY_
+  PROOF.txt);
+* брокерские действия не добавлены; Sandbox/LIVE нет; заявок нет
+  (STAGE_C1_NO_EXECUTION_CHANGES_PROOF.md);
+* Stage D не начата.
+
+================================================================================
+КОНЕЦ СВОДКИ. Полные логи — в appendix_stage_c1/.
+================================================================================

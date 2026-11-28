@@ -1,0 +1,18 @@
+STAGE D — ТОЧНЫЙ СПИСОК ИЗМЕНЁННЫХ/ДОБАВЛЕННЫХ ФАЙЛОВ
+Сравнение: candidate Stage C.1 (pristine, commit ee50808) vs candidate Stage D (рабочий пакет), byte-for-byte SHA-256
+
+Файлов в Stage C.1 candidate: 177
+Файлов в Stage D candidate:   179
+
+ДОБАВЛЕНЫ (2):
+  + strategy_risk.py
+  + tests/test_stage_d_strategy_risk.py
+
+ИЗМЕНЕНЫ (0):
+
+УДАЛЕНЫ (0):
+
+БЕЗ ИЗМЕНЕНИЙ: 177 файлов (byte-for-byte)
+
+ПРАВИЛО ТЗ §11: только новые файлы Stage D разрешены; старые файлы candidate не изменены.
+СОСТОЯНИЕ: OK — добавлены только новые файлы Stage D; ни один старый файл не изменён и не удалён.

@@ -1,0 +1,34 @@
+STAGE D — TEST RESULTS SUMMARY
+================================
+
+Environment: Linux, Python 3.12.16, pytest 9.0.2 (/home/z/.venv/bin/python)
+Mode: OFFLINE ONLY. No network, no broker, no Sandbox/LIVE execution.
+
+BASELINE (before Stage D, package = Samsung_V4_STAGE_C_1, commit ee50808):
+  full      : 1391 passed, 0 failed, 0 skipped   (pytest_before_full.log)
+  canonical :  871 passed, 0 failed, 0 skipped   (pytest_before_canonical.log)
+  Matches task spec §11 required baseline.
+
+AFTER STAGE D:
+  full      : 1553 passed, 0 failed, 0 skipped   (pytest_after_full.log)
+  canonical : 1033 passed, 0 failed, 0 skipped   (pytest_after_canonical.log)
+  delta     : +162 tests (candidate/tests/test_stage_d_strategy_risk.py)
+
+Stage D suite alone:
+  python -m pytest tests/test_stage_d_strategy_risk.py
+    -> 162 passed, 0 failed, 0 skipped
+
+Old tests: 1391 present in after-full log, 0 lost, 0 weakened, 0 rewritten.
+Golden fixtures: tests/fixtures/legacy_golden_signals.json unchanged
+  (SHA-256 verified in STAGE_D_IMMUTABILITY_PROOF.txt).
+
+Verification of "zero failed/skipped": grep -c "FAILED\|SKIPPED\|ERROR"
+  on both after-logs -> 0.
+
+Full verbose logs: appendix_stage_d/
+  pytest_before_full.log, pytest_before_canonical.log,
+  pytest_after_full.log,  pytest_after_canonical.log
+
+FINAL PACKAGE VERIFICATION (run from Samsung_V4_STAGE_D/candidate as shipped):
+  full: 1553 passed in 23.30s
+  canonical: 1033 passed in 11.48s

@@ -1,0 +1,67 @@
+STAGE D — NEGATIVE-TEST EVIDENCE (ТЗ §12: negative-test evidence)
+
+Два уровня доказательства:
+  A) Прямые прогоны «сломанных реализаций» против контракта Stage D
+     (сценарии мутаций результата, tamper политики/конфигурации,
+     сломанный сизер): каждая попытка ПЕРЕХВАЧЕНА.
+  B) Полный прогон негативного класса тестов
+     TestStageDNegativeMutationTests (pytest -v): 19 passed.
+
+========================================================================
+A) ПРЯМЫЕ ПРОГОНЫ СЛОМАННЫХ РЕАЛИЗАЦИЙ
+========================================================================
+[CAUGHT] positive quantity in BLOCKED outcome (bypass construction): SizingResultViolationError: блокирующий результат несёт положительный объём
+[CAUGHT] quantity exceeds RISK BUDGET: SizingResultViolationError: объём превышает риск-бюджет (точная проверка)
+[CAUGHT] quantity exceeds NOTIONAL CAP: SizingResultViolationError: объём превышает риск-бюджет (точная проверка)
+[CAUGHT] quantity exceeds BUYING POWER: SizingResultViolationError: объём превышает покупательную способность (точная проверка)
+[CAUGHT] quantity not multiple of lot: SizingResultViolationError: объём результата не кратен lot_size
+[CAUGHT] wrong attribution (strategy_id='beta'): SizingResultViolationError: атрибуция результата не совпадает с политикой
+[CAUGHT] wrong policy_hash: SizingResultViolationError: risk_policy_hash результата не совпадает с хешем фактических параметров политики
+[CAUGHT] fabricated money (total_position_risk=1.0): SizingResultViolationError: total_position_risk результата не совпадает с точным значением quantity * total_risk_per_u
+[CAUGHT] stripped diagnostics: SizingResultViolationError: диагностика расчётного результата обязана содержать inputs_decimal и computed_decimal
+[CAUGHT] tampered diagnostics (fake cheap risk): SizingResultViolationError: total_risk_per_unit диагностики не согласован со входом
+[BROKEN SIZER] returns quantity=100 for stop ABOVE entry (stop=105, entry=100)
+[CONTRACT    ] real sizer -> INVALID_STOP_GEOMETRY / STOP_NOT_BELOW_ENTRY / quantity=0
+[CAUGHT] broken sizer output rejected by validator: SizingResultViolationError: price_risk_per_unit диагностики не согласован со входом
+[CAUGHT] tampered policy (hash integrity): RiskPolicyViolationError: целостность RiskPolicy нарушена: хеш фактических полей 'b1e5122be9a5b969c78dc20b33702bf13a
+[CONTRACT    ] tampered policy -> POLICY_INVALID / POLICY_HASH_MISMATCH / quantity=0
+[CAUGHT] NaN equity input: SizingInputViolationError: SizingInput.available_equity: NaN/Infinity запрещены (нефинитные входы блокируют расчёт, Т
+[CAUGHT] tampered config_hash (Stage A.2.1 recheck): SizingContractViolationError: конфигурация не прошла проверку атрибуции Stage A.2.1 (config_hash против фактических пара
+[CAUGHT] policy subclass bypass: SizingContractViolationError: calculate_position_size требует точный тип RiskPolicy (подклассы не проходят, ТЗ §3); полу
+
+ALL NEGATIVE PROBES CAUGHT BY THE CONTRACT
+
+========================================================================
+B) PYTEST: TestStageDNegativeMutationTests (15 тестов)
+========================================================================
+============================= test session starts ==============================
+platform linux -- Python 3.12.16, pytest-9.0.2, pluggy-1.6.0 -- /home/z/.venv/bin/python3
+cachedir: .pytest_cache
+metadata: {'Python': '3.12.16', 'Platform': 'Linux-5.10.134-013.15.kangaroo.al8.x86_64-x86_64-with-glibc2.41', 'Packages': {'pytest': '9.0.2', 'pluggy': '1.6.0'}, 'Plugins': {'Faker': '40.1.2', 'metadata': '3.1.1', 'asyncio': '1.3.0', 'ddtrace': '4.2.2', 'cov': '7.0.0', 'json-report': '1.5.0', 'anyio': '4.13.0'}}
+rootdir: /home/z
+configfile: pyproject.toml
+plugins: Faker-40.1.2, metadata-3.1.1, asyncio-1.3.0, ddtrace-4.2.2, cov-7.0.0, json-report-1.5.0, anyio-4.13.0
+asyncio: mode=Mode.STRICT, debug=False, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
+collecting ... collected 19 items
+
+tests/test_stage_d_strategy_risk.py::TestStageDNegativeMutationTests::test_positive_quantity_in_blocked_outcome_not_constructible PASSED [  5%]
+tests/test_stage_d_strategy_risk.py::TestStageDNegativeMutationTests::test_quantity_not_multiple_of_lot_not_constructible PASSED [ 10%]
+tests/test_stage_d_strategy_risk.py::TestStageDNegativeMutationTests::test_diagnostics_stripped_result_not_constructible PASSED [ 15%]
+tests/test_stage_d_strategy_risk.py::TestStageDNegativeMutationTests::test_fractional_result_money_not_constructible PASSED [ 21%]
+tests/test_stage_d_strategy_risk.py::TestStageDNegativeMutationTests::test_validator_catches_positive_quantity_in_blocked PASSED [ 26%]
+tests/test_stage_d_strategy_risk.py::TestStageDNegativeMutationTests::test_validator_catches_quantity_exceeding_risk_budget PASSED [ 31%]
+tests/test_stage_d_strategy_risk.py::TestStageDNegativeMutationTests::test_validator_catches_quantity_exceeding_notional_cap PASSED [ 36%]
+tests/test_stage_d_strategy_risk.py::TestStageDNegativeMutationTests::test_validator_catches_quantity_exceeding_buying_power PASSED [ 42%]
+tests/test_stage_d_strategy_risk.py::TestStageDNegativeMutationTests::test_validator_catches_quantity_not_multiple_of_lot PASSED [ 47%]
+tests/test_stage_d_strategy_risk.py::TestStageDNegativeMutationTests::test_validator_catches_wrong_policy_hash PASSED [ 52%]
+tests/test_stage_d_strategy_risk.py::TestStageDNegativeMutationTests::test_validator_catches_wrong_attribution PASSED [ 57%]
+tests/test_stage_d_strategy_risk.py::TestStageDNegativeMutationTests::test_validator_catches_wrong_figi PASSED [ 63%]
+tests/test_stage_d_strategy_risk.py::TestStageDNegativeMutationTests::test_validator_catches_fabricated_money PASSED [ 68%]
+tests/test_stage_d_strategy_risk.py::TestStageDNegativeMutationTests::test_validator_catches_fabricated_budget PASSED [ 73%]
+tests/test_stage_d_strategy_risk.py::TestStageDNegativeMutationTests::test_validator_catches_stripped_diagnostics PASSED [ 78%]
+tests/test_stage_d_strategy_risk.py::TestStageDNegativeMutationTests::test_validator_catches_tampered_diagnostics PASSED [ 84%]
+tests/test_stage_d_strategy_risk.py::TestStageDNegativeMutationTests::test_validator_catches_inflated_notional_money PASSED [ 89%]
+tests/test_stage_d_strategy_risk.py::TestStageDNegativeMutationTests::test_broken_sizer_implementation_is_caught PASSED [ 94%]
+tests/test_stage_d_strategy_risk.py::TestStageDNegativeMutationTests::test_validator_rejects_foreign_types PASSED [100%]
+
+============================== 19 passed in 0.34s ==============================

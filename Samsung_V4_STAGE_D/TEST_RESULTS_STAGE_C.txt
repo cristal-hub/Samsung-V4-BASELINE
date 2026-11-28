@@ -1,0 +1,121 @@
+================================================================================
+TEST_RESULTS_STAGE_C.txt — STAGE C
+SAMSUNG V4 — NEW STRATEGY ENGINE. STAGE C:
+ТИПИЗИРОВАННЫЕ КОНТРАКТЫ ВХОДА/ВЫХОДА И ДЕТЕРМИНИРОВАННОЕ
+ОБЪЕДИНЕНИЕ ВЫХОДОВ
+Дата прогона: 2026-11-28
+База: принятый пакет Stage B.1 (commit
+e413c5bd6bdec436ffd7aeece4c28b5e969c6306), побайтово не изменён
+(223/223 файлов совпадают с принятым ZIP — STAGE_C_IMMUTABILITY_PROOF.txt)
+Использованные принятые ссылки:
+  Baseline: commit 884cefd6f12a99f6adc14b5ed4c9eeda21d32e04
+  Accepted Stage A.2.1: commit 103d22d34d483fbb7179d1fef07dd0e24b51dfcd
+  Accepted Stage B.1: commit e413c5bd6bdec436ffd7aeece4c28b5e969c6306
+Режим: ТОЛЬКО offline — READ ONLY DATA / RESEARCH ONLY / NO LIVE ORDERS /
+NO REAL MONEY. Без сети, без брокера, без Sandbox/LIVE-заявок.
+Окружение: Python 3.12.16, pytest 9.0.2, pandas 2.2.3,
+pandas-ta-classic 0.9.0.
+================================================================================
+
+0. СВОДКА ДО / ПОСЛЕ (ТЗ Stage C §7 — полный лог pytest до и после)
+--------------------------------------------------------------------------------
+Прогон «ДО Stage C» (принятый пакет Stage B.1, БЕЗ изменений;
+та же изолированная копия до добавления файлов Stage C):
+
+  python -m pytest       (полный набор):      1261 passed, 0 failed
+  python -m pytest tests (канонический набор):  741 passed, 0 failed
+
+Прогон «ПОСЛЕ Stage C» (база + 3 новых файла Stage C:
+candidate/strategy_contracts.py,
+candidate/tests/test_stage_c_contracts.py,
+candidate/tests/test_stage_c_exit_service.py):
+
+  python -m pytest       (полный набор):      1384 passed, 0 failed
+  python -m pytest tests (канонический набор):  864 passed, 0 failed
+
+Разница: +123 новых тестов Stage C
+(tests/test_stage_c_contracts.py — 91, tests/test_stage_c_exit_service.py — 32).
+Ни один старый тест не удалён, не пропущен и не ослаблен; golden fixtures
+не перегенерированы (все файлы базы побайтово неизменны).
+
+Полные логи (реальный вывод pytest):
+  appendix_stage_c/pytest_before_full.log          — ДО, полный набор
+  appendix_stage_c/pytest_before_canonical.log     — ДО, канонический
+  appendix_stage_c/pytest_after_full.log           — ПОСЛЕ, полный набор
+  appendix_stage_c/pytest_after_canonical.log      — ПОСЛЕ, канонический
+
+Список всех новых тестов: appendix_stage_c/new_tests_list.txt
+
+--------------------------------------------------------------------------------
+
+1. ПОКРЫТИЕ ОБЯЗАТЕЛЬНЫХ СЦЕНАРИЕВ ТЗ STAGE C §6
+--------------------------------------------------------------------------------
+§6.1  Все допустимые состояния Entry contract
+     Где покрыто: test_stage_c_contracts.py::TestEntryContractStates (7 тестов: все 6 состояний, единственность разрешения входа, неизменяемость) + TestEntryRunner (BUY/HOLD/SELL)
+§6.2  Отклонение некорректного Entry result
+     Где покрыто: TestEntryContractRejections (7: строковый outcome, lowercase/пустой reason_code, не-JSON/NaN диагностика, None/чужие типы, ослабленный подкласс) + TestEntryRunner (EVALUATOR_RAISED, ATTRIBUTION_MISMATCH, RESULT_WRONG_TYPE, DIRECTION_UNKNOWN, misuse)
+§6.3  Все допустимые состояния Exit contract
+     Где покрыто: TestExitContractStates (8: стратегический, защитный, no-exit от обоих слоёв, blocked от всех трёх источников, decided_at, неизменяемость)
+§6.4  Отклонение некорректного Exit result
+     Где покрыто: TestExitContractRejections (7: несогласованные outcome/source, exit_type-инварианты, None, чужой тип, ослабленный подкласс)
+§6.5  Защитный выход не подавляется стратегическим
+     Где покрыто: TestExitMerging::test_protective_not_suppressed_by_strategic + таблица истинности (3 случая PROTECTIVE_EXIT побеждает) + координатор end-to-end (test_stage_c_exit_service.py::test_protective_exit_wins_end_to_end)
+§6.6  Стратегический выход не отменяет защитный
+     Где покрыто: TestExitMerging::test_strategic_exit_cannot_cancel_protective + test_missing_strategic_exit_does_not_cancel_protective
+§6.7  Детерминированность объединения
+     Где покрыто: TestExitMerging::test_merge_is_deterministic (10 повторов, равенство результатов и diagnostics) — merge является чистой функцией
+§6.8  Конфликтующие причины выхода
+     Где покрыто: TestExitMerging::test_conflicting_reasons_preserved + test_incomplete_does_not_lose_strategic_info (обе причины сохраняются в diagnostics)
+§6.9  Отсутствие цены
+     Где покрыто: TestPriceGate::test_missing_price + TestCoordinatorPriceGate::test_missing_price_blocks_before_evaluators (оценщики не вызываются, состояние не изменяется)
+§6.10  Некорректная цена
+     Где покрыто: TestPriceGate (чужой тип, чужой FIGI, будущее время, нечитаемая метка, нулевая/NaN/отрицательная/bool цена отклоняется при создании) + TestCoordinatorPriceGate (PRICE_WRONG_TYPE, PRICE_FOREIGN_FIGI, мусорная цена не доходит до оценщиков)
+§6.11  Устаревшая цена
+     Где покрыто: TestPriceGate::test_stale_price + граница max_age (test_staleness_boundary_exactly_max_age_is_ok) + TestCoordinatorPriceGate::test_stale_price_blocks_and_state_untouched
+§6.12  Отсутствие фиктивного исполнения при ошибке оценки
+     Где покрыто: TestFailedEvaluationNoFictitiousExecution (5: исключение оценщика -> EVALUATION_BLOCKED/INCOMPLETE, никакого «исполнен-ного» выхода в состоянии, мусорный результат оценщика отклоняется, подкласс-результат отклоняется, частичный отчёт невозможен)
+§6.13  Сохранение состояния при неудачной оценке выхода
+     Где покрыто: TestFailedEvaluationNoFictitiousExecution::test_state_preserved_on_failed_evaluation (побайтовое равенство to_json до/после) + test_state_preserved_on_price_block
+§6.14  Корректная атрибуция strategy_id/config_hash/FIGI
+     Где покрыто: TestContractAttribution (6) + TestCoordinatorAttribution (report/результаты/запись в состоянии несут атрибуцию; подмена config_hash отклоняется перепроверкой Stage A.2.1; несовпадение config_hash состояния — StateConfigMismatchError без маскировки)
+§6.15  Изоляция состояний нескольких стратегий
+     Где покрыто: TestStateIsolation::test_two_strategies_same_figi_isolated + изоляция в persistent-хранилище с восстановлением (test_isolation_persists_in_persistent_store)
+§6.16  Изоляция нескольких FIGI
+     Где покрыто: TestStateIsolation::test_same_strategy_two_figi_isolated
+§6.17  Конкурентное обновление состояния через Stage B.1
+     Где покрыто: TestConcurrentStateUpdates (2: два менеджера на разных экземплярах StateStore одного пути + координаторы в 8 потоках — 80 RMW-обновлений без потерь; повторный прогон даёт те же итоги)
+§6.18  Регрессия всех тестов Stage A.2.1
+     Где покрыто: Полный/канонический прогон: тесты Stage A.2.1 в составе набора (tests/test_stage_a2_1_context_integrity.py — 76 passed, test_stage_a2_config_hash_integrity.py, test_stage_a1_config_immutability.py и др.); файлы Stage A побайтово неизменны
+§6.19  Регрессия всех тестов Stage B.1
+     Где покрыто: Полный/канонический прогон: tests/test_stage_b1_state_key_and_concurrency.py — 33 passed, tests/test_stage_b_state_isolation.py — 115 passed; файлы Stage B/B.1 побайтово неизменны
+--------------------------------------------------------------------------------
+
+2. СЧЁТЧИКИ КЛЮЧЕВЫХ ФАЙЛОВ ТЕСТОВ (реальный лог ПОСЛЕ)
+--------------------------------------------------------------------------------
+  tests/test_stage_c_contracts.py.................... 91 passed
+  tests/test_stage_c_exit_service.py................. 32 passed
+  tests/test_stage_b_state_isolation.py.............. 115 passed
+  tests/test_stage_b1_state_key_and_concurrency.py... 33 passed
+  tests/test_stage_a2_1_context_integrity.py......... 76 passed
+
+3. ИТОГИ ПРОГОНОВ
+--------------------------------------------------------------------------------
+  ДО     полный набор:       ============================ 1261 passed in 21.73s =============================
+  ДО     канонический набор: ============================= 741 passed in 11.24s =============================
+  ПОСЛЕ  полный набор:       ============================ 1384 passed in 23.22s =============================
+  ПОСЛЕ  канонический набор: ============================= 864 passed in 12.06s =============================
+
+4. ПРОВЕРКА ГРАНИЦ STAGE C (ТЗ §4/§7)
+--------------------------------------------------------------------------------
+  * торговое исполнение не изменено, брокерские действия не добавлены:
+    см. STAGE_C_NO_EXECUTION_CHANGES_PROOF.md;
+  * все 223 файла принятой базы Stage B.1 побайтово неизменны
+    (STAGE_C_IMMUTABILITY_PROOF.txt);
+  * добавлены ровно 3 файла: strategy_contracts.py + 2 файла тестов;
+  * golden fixtures не перегенерированы
+    (tests/fixtures/legacy_golden_signals.json побайтово неизменен).
+
+5. НЕИЗВЕСТНЫЕ ОГРАНИЧЕНИЯ
+--------------------------------------------------------------------------------
+  См. KNOWN_LIMITATIONS_STAGE_C.md.
+================================================================================

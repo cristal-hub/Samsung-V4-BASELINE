@@ -1,0 +1,382 @@
+--- Stage_C/candidate/strategy_contracts.py
++++ Stage_C.1/candidate/strategy_contracts.py
+@@ -23,12 +23,20 @@
+ #     «как будто выход состоялся» — возвращается отдельный типизиро-
+ #     ванный результат невозможности безопасной оценки;
+ #   * State integration (§3.5): интеграция с StrategyStateManager
+ #     Stage B.1 — изоляция по (strategy_id, FIGI), проверка config_hash,
+ #     обновление ТОЛЬКО через существующий атомарный API, ошибки
+ #     состояния не маскируются.
++#
++# STAGE C.1 (исправление дефекта порядка операций): price gate
++#   выполняется СТРОГО ДО любого доступа к состоянию. manager.get_state
++#   Stage B.1 создаёт запись при отсутствии, поэтому при блокирующей
++#   цене (отсутствующая/некорректная/устаревшая) состояние НЕ
++#   запрашивается вовсе: новая запись состояния не создаётся,
++#   существующая не изменяется, оценщики не вызываются — fail-closed
++#   до границы оценки, без побочных эффектов на хранилище.
+ #
+ # ГРАНИЦЫ STAGE C (ТЗ §4 — строго соблюдены):
+ #   * это контрактный слой и интеграция состояния, а НЕ торговое
+ #     исполнение: модуль НЕ размещает и НЕ отменяет заявки, НЕ
+ #     подключается к брокеру/Sandbox/LIVE, НЕ реализует симулятор,
+ #     исторические данные, risk sizing, EmergencyExitController,
+@@ -1424,21 +1432,27 @@
+         хранения НЕ создаётся (только StateStore через менеджер);
+       * обновления состояния выполняются ТОЛЬКО через существующий
+         атомарный API manager.update_state (атомарный read-modify-write
+         Stage B.1); ошибки состояния пробрасываются как есть (не
+         маскируются пустыми значениями).
+ 
+-    Fail-closed цена (ТЗ §3.4):
++    Fail-closed цена (ТЗ §3.4 + порядок Stage C.1):
+       * price_required=True и цена отсутствует/некорректна/устарела —
+         оценщики НЕ вызываются, состояние НЕ изменяется, возвращается
+         отчёт с итогом INCOMPLETE_PRICE_EVALUATION и диагностикой;
+       * нулевая цена не подставляется; последняя известная цена не
+         используется (механизма подстановки НЕ существует);
+       * если цена НЕ требуется (price_required=False), но ПЕРЕДАНА
+         некорректная/устаревшая цена — она не дойдёт до оценщиков:
+-        fail-closed блокировка (мусорные данные не проходят молча).
++        fail-closed блокировка (мусорные данные не проходят молча);
++      * ПОРЯДОК STAGE C.1: проверка цены выполняется СТРОГО ДО
++        manager.get_state — get_state Stage B.1 создаёт запись при
++        отсутствии, поэтому при блокирующей цене состояние НЕ
++        запрашивается вовсе: новая запись не создаётся, существующая
++        не изменяется (хранилище не получает побочных эффектов до
++        прохождения price gate).
+ 
+     Запись в состояние:
+       * при ИСПОЛНИМОМ итоге (PROTECTIVE_EXIT / STRATEGIC_EXIT / NO_EXIT)
+         в данные состояния пары через атомарный updater записывается
+         ключ "last_exit_evaluation" (типизированная сводка решения);
+       * при INCOMPLETE_* состояние НЕ изменяется вовсе (нельзя менять
+@@ -1572,13 +1586,21 @@
+                             figi: Any,
+                             price_required: bool,
+                             price_max_age_seconds: Optional[float],
+                             price: Any = None,
+                             now: Optional[datetime] = None
+                             ) -> ExitDecisionReport:
+-        """Один цикл: проверка цены -> два оценщика -> merge -> состояние.
++        """Один цикл: config/FIGI -> price gate -> состояние -> оценщики
++        -> merge -> запись состояния.
++
++        ПОРЯДОК ОПЕРАЦИЙ (Stage C.1): проверка цены выполняется СТРОГО
++        ДО manager.get_state. Так как get_state Stage B.1 создаёт запись
++        при отсутствии, блокирующая цена (отсутствующая/некорректная/
++        устаревшая) возвращает INCOMPLETE_PRICE_EVALUATION БЕЗ доступа
++        к хранилищу: новая запись состояния не создаётся, существующая
++        не изменяется, оценщики не вызываются.
+ 
+         price_required и price_max_age_seconds — ЯВНЫЕ обязательные
+         параметры (скрытых умолчаний для торговых решений нет, ТЗ §5):
+         None для price_max_age_seconds означает отключённую проверку
+         устаревания явным решением оператора.
+         """
+@@ -1621,18 +1643,16 @@
+ 
+         now_dt = _validate_utc_datetime(now, "now",
+                                         CoordinatorViolationError) \
+             if now is not None else datetime.now(timezone.utc)
+         decided_at = self._clock()
+ 
+-        # 3. Чтение состояния пары через менеджер Stage B.1 (изоляция по
+-        #    ключу; несовпадение config_hash — StateConfigMismatchError).
+-        state = self._manager.get_state(
+-            strategy_id, figi, config_hash=config_hash)
+-
+-        # 4. Fail-closed проверка цены ДО вызова оценщиков.
++        # 3. Price gate ДО ЛЮБОГО доступа к состоянию (Stage C.1):
++        #    manager.get_state Stage B.1 создаёт запись при отсутствии,
++        #    поэтому при блокирующей цене состояние НЕ запрашивается
++        #    вовсе — хранилище не получает побочных эффектов.
+         price_check = check_price(
+             price, expected_figi=figi, now=now_dt,
+             max_age_seconds=price_max_age_seconds)
+ 
+         blocked_before_evaluators = (
+             (price_required and
+@@ -1640,15 +1660,17 @@
+             or (not price_required and price_check.outcome is
+                 PriceCheckOutcome.PRICE_INVALID)
+             or (not price_required and price_check.outcome is
+                 PriceCheckOutcome.PRICE_STALE))
+ 
+         if blocked_before_evaluators:
+-            # ТЗ §3.4: отдельный типизированный результат невозможности
+-            # безопасной оценки. Оценщики НЕ вызываются, состояние НЕ
+-            # изменяется, фиктивный выход не создаётся.
++            # ТЗ §3.4 + Stage C.1: отдельный типизированный результат
++            # невозможности безопасной оценки. Оценщики НЕ вызываются,
++            # manager.get_state НЕ вызывается (запись состояния не
++            # создаётся, существующая не изменяется), фиктивный выход
++            # не создаётся.
+             price_diagnostics = dict(price_check.diagnostics.to_mutable())
+             price_diagnostics["evaluators_called"] = False
+             price_diagnostics["price_required"] = price_required
+             price_diagnostics["detail"] = \
+                 (price_diagnostics.get("detail") or "") + \
+                 "; выход не оценивался: безопасная оценка цены " \
+@@ -1669,12 +1691,18 @@
+                 strategic_result=None,
+                 protective_result=None,
+                 state_updated=False,
+                 decided_at=decided_at,
+             )
+ 
++        # 4. Чтение состояния пары через менеджер Stage B.1 (изоляция по
++        #    ключу; несовпадение config_hash — StateConfigMismatchError):
++        #    ТОЛЬКО после прохождения price gate (Stage C.1).
++        state = self._manager.get_state(
++            strategy_id, figi, config_hash=config_hash)
++
+         # 5. Запрос оценщикам: только проверенные значения; данные
+         #    состояния пары — как есть (ImmutableMapping).
+         request = ExitEvaluationRequest(
+             strategy_id=strategy_id,
+             config_hash=config_hash,
+             figi=figi,
+--- Stage_C/candidate/tests/test_stage_c_exit_service.py
++++ Stage_C.1/candidate/tests/test_stage_c_exit_service.py
+@@ -14,16 +14,25 @@
+ #   §6.15 изоляция состояний нескольких стратегий;
+ #   §6.16 изоляция нескольких FIGI;
+ #   §6.17 конкурентное обновление состояния через Stage B.1;
+ #   плюс: ошибки состояния не маскируются; подмена config_hash
+ #   отклоняется (Stage A.2.1 перепроверка); подклассы не проходят.
+ #
++# STAGE C.1 (исправление дефекта порядка операций): price gate СТРОГО
++#   ДО доступа к состоянию. manager.get_state Stage B.1 создаёт запись
++#   при отсутствии, поэтому блокирующая цена (отсутствующая/
++#   некорректная/устаревшая) не должна оставлять в хранилище НИКАКИХ
++#   следов. Проверяется ФАКТИЧЕСКОЕ состояние StateStore (публичный
++#   StateStore.get_state() и файлы хранилища), а не только
++#   report.state_updated.
++#
+ # Все тесты offline, без сети и брокера; никаких заявок; старые файлы
+ # Samsung не затрагиваются.
+ 
+ import json
++import os
+ import threading
+ from concurrent.futures import ThreadPoolExecutor
+ from datetime import datetime, timedelta, timezone
+ 
+ import pytest
+ 
+@@ -678,6 +687,214 @@
+         coordinator, _, _ = make_coord(manager)
+         with pytest.raises(CoordinatorViolationError):
+             coordinator.evaluate_and_record(
+                 config=config, figi="FIGI1", price_required=True,
+                 price_max_age_seconds=120.0, price=make_price(),
+                 now=datetime(2026, 11, 28, 12, 0, 0))  # naive
++
++
++# ===========================================================================
++# Stage C.1 — price gate СТРОГО ДО доступа к состоянию
++#
++# Дефект: manager.get_state Stage B.1 создаёт запись при отсутствии,
++# поэтому прежний порядок (get_state -> проверка цены) изменял
++# хранилище ЕЩЁ ДО блокировки оценки при плохой цене. Исправленный
++# порядок: config/FIGI -> проверка цены -> (только после прохождения
++# price gate) manager.get_state -> оценщики -> merge -> запись.
++#
++# Проверяется ФАКТИЧЕСКОЕ состояние хранилища: публичный
++# StateStore.get_state(), файлы persistent-хранилища, полный to_json()
++# записи (включая updated_at) — а не только report.state_updated.
++# ===========================================================================
++
++def _json_file_names(tmp_path):
++    """Имена JSON-записей состояния в persistent-хранилище."""
++    return sorted(n for n in os.listdir(str(tmp_path))
++                  if n.endswith(".json"))
++
++
++class TestPriceGateBeforeStateAccess:
++    """ТЗ Stage C.1 §4: блокирующая цена не трогает StateStore."""
++
++    # --- сценарии 1-3: блокирующая цена + ОТСУТСТВУЮЩАЯ запись -----------
++
++    def test_missing_price_missing_record_no_state_created(self, tmp_path):
++        """Сценарий 1: цена отсутствует + записи нет.
++
++        INCOMPLETE_PRICE_EVALUATION; оба оценщика не вызваны;
++        StateStore.get_state(...) возвращает None; файл состояния
++        НЕ создан."""
++        store = StateStore(path=str(tmp_path))
++        manager = StrategyStateManager(store)
++        config = make_config()
++        coordinator, strategic, protective = make_coord(manager)
++        report = run(coordinator, config, price=None)
++        assert report.merged.final_outcome is \
++            ExitMergeOutcome.INCOMPLETE_PRICE_EVALUATION
++        assert report.merged.reason_code == "PRICE_MISSING"
++        assert report.strategic_result is None
++        assert report.protective_result is None
++        assert strategic.calls == 0 and protective.calls == 0
++        assert report.state_updated is False
++        # Публичный StateStore.get_state(): записи НЕТ.
++        assert store.get_state("alpha", "FIGI1") is None
++        # Файл состояния НЕ создан.
++        assert _json_file_names(tmp_path) == []
++
++    def test_stale_price_missing_record_no_state_created(self, tmp_path):
++        """Сценарий 2: устаревшая цена + записи нет — те же проверки,
++        никаких новых файлов состояния."""
++        store = StateStore(path=str(tmp_path))
++        manager = StrategyStateManager(store)
++        config = make_config()
++        coordinator, strategic, protective = make_coord(manager)
++        stale = make_price(offset_seconds=-600.0)
++        report = run(coordinator, config, price=stale, max_age=120.0)
++        assert report.merged.final_outcome is \
++            ExitMergeOutcome.INCOMPLETE_PRICE_EVALUATION
++        assert report.merged.reason_code == "PRICE_STALE"
++        assert strategic.calls == 0 and protective.calls == 0
++        assert report.state_updated is False
++        assert store.get_state("alpha", "FIGI1") is None
++        assert _json_file_names(tmp_path) == []
++
++    def test_foreign_figi_price_missing_record_no_state_created(
++            self, tmp_path):
++        """Сценарий 3: чужой FIGI у цены + записи нет — те же проверки."""
++        store = StateStore(path=str(tmp_path))
++        manager = StrategyStateManager(store)
++        config = make_config()
++        coordinator, strategic, protective = make_coord(manager)
++        foreign = make_price(figi="OTHER")
++        report = run(coordinator, config, price=foreign)
++        assert report.merged.final_outcome is \
++            ExitMergeOutcome.INCOMPLETE_PRICE_EVALUATION
++        assert report.merged.reason_code == "PRICE_FOREIGN_FIGI"
++        assert strategic.calls == 0 and protective.calls == 0
++        assert report.state_updated is False
++        assert store.get_state("alpha", "FIGI1") is None
++        assert _json_file_names(tmp_path) == []
++
++    # --- сценарии 4-5: блокирующая цена + СУЩЕСТВУЮЩАЯ запись ------------
++
++    def test_missing_price_existing_record_untouched(self, tmp_path):
++        """Сценарий 4: цена отсутствует + запись существует.
++
++        Исходный to_json() полностью совпадает после вызова;
++        updated_at не изменился; данные не изменились; файл записи
++        на диске побайтово тот же."""
++        store = StateStore(path=str(tmp_path))
++        manager = StrategyStateManager(store)
++        config = make_config()
++        manager.update_state("alpha", "FIGI1",
++                             config_hash=config.config_hash,
++                             data={"position": 10, "avg_price": 99.5})
++        before_state = store.get_state("alpha", "FIGI1")
++        before = before_state.to_json()
++        before_updated_at = before_state.updated_at
++        coordinator, strategic, protective = make_coord(manager)
++        report = run(coordinator, config, price=None)
++        assert report.merged.final_outcome is \
++            ExitMergeOutcome.INCOMPLETE_PRICE_EVALUATION
++        assert report.merged.reason_code == "PRICE_MISSING"
++        assert strategic.calls == 0 and protective.calls == 0
++        assert report.state_updated is False
++        after_state = store.get_state("alpha", "FIGI1")
++        assert after_state is not None
++        # Полное совпадение (данные + updated_at + created_at + хеш).
++        assert after_state.to_json() == before
++        assert after_state.updated_at == before_updated_at
++        assert after_state.data["position"] == 10
++        assert after_state.data["avg_price"] == 99.5
++        assert "last_exit_evaluation" not in after_state.data
++        # Файл записи на диске побайтово не изменился.
++        names = _json_file_names(tmp_path)
++        assert len(names) == 1
++        with open(os.path.join(str(tmp_path), names[0]),
++                  "r", encoding="utf-8") as fh:
++            assert fh.read() == before
++
++    def test_stale_price_existing_record_untouched(self, tmp_path):
++        """Сценарий 5: устаревшая цена + запись существует — те же
++        проверки: to_json() совпадает, updated_at не изменился,
++        файл побайтово тот же."""
++        store = StateStore(path=str(tmp_path))
++        manager = StrategyStateManager(store)
++        config = make_config()
++        manager.update_state("alpha", "FIGI1",
++                             config_hash=config.config_hash,
++                             data={"position": 3, "mode": "hold"})
++        before_state = store.get_state("alpha", "FIGI1")
++        before = before_state.to_json()
++        before_updated_at = before_state.updated_at
++        coordinator, strategic, protective = make_coord(manager)
++        stale = make_price(offset_seconds=-600.0)
++        report = run(coordinator, config, price=stale, max_age=120.0)
++        assert report.merged.final_outcome is \
++            ExitMergeOutcome.INCOMPLETE_PRICE_EVALUATION
++        assert report.merged.reason_code == "PRICE_STALE"
++        assert strategic.calls == 0 and protective.calls == 0
++        assert report.state_updated is False
++        after_state = store.get_state("alpha", "FIGI1")
++        assert after_state is not None
++        assert after_state.to_json() == before
++        assert after_state.updated_at == before_updated_at
++        assert after_state.data["position"] == 3
++        assert "last_exit_evaluation" not in after_state.data
++        names = _json_file_names(tmp_path)
++        assert len(names) == 1
++        with open(os.path.join(str(tmp_path), names[0]),
++                  "r", encoding="utf-8") as fh:
++            assert fh.read() == before
++
++    # --- сценарий 6: price_required=False + price=None -------------------
++
++    def test_price_not_required_none_price_evaluators_called(self):
++        """Сценарий 6: цена не требуется и не передана — штатное
++        поведение Stage C сохраняется: оценщики вызываются, итог
++        записывается в состояние (допустимый исход NO_EXIT)."""
++        manager = StrategyStateManager(StateStore())
++        config = make_config()
++        coordinator, strategic, protective = make_coord(manager)
++        report = run(coordinator, config, price=None, price_required=False)
++        assert report.price_check.outcome is PriceCheckOutcome.PRICE_MISSING
++        assert strategic.calls == 1 and protective.calls == 1
++        assert report.merged.final_outcome is ExitMergeOutcome.NO_EXIT
++        assert report.state_updated is True
++        state = manager.get_state("alpha", "FIGI1",
++                                  config_hash=config.config_hash)
++        record = state.data["last_exit_evaluation"]
++        assert record["outcome"] == "NO_EXIT"
++        assert record["strategy_id"] == "alpha"
++        assert record["figi"] == "FIGI1"
++
++    # --- сценарий 7: валидная цена ----------------------------------------
++
++    def test_valid_price_state_obtained_and_updated_per_stage_c_rules(self):
++        """Сценарий 7: валидная цена — состояние получается штатно,
++        оценщики вызываются, существующая запись обновляется ТОЛЬКО по
++        правилам Stage C (добавляется last_exit_evaluation, прочие
++        данные записи сохраняются)."""
++        manager = StrategyStateManager(StateStore())
++        config = make_config()
++        manager.update_state("alpha", "FIGI1",
++                             config_hash=config.config_hash,
++                             data={"position": 7, "note": "kept"})
++        coordinator, strategic, protective = make_coord(
++            manager, protective="protective_exit")
++        report = run(coordinator, config, price=make_price())
++        assert report.price_check.outcome is PriceCheckOutcome.PRICE_OK
++        assert report.price_check.price is not None
++        assert strategic.calls == 1 and protective.calls == 1
++        assert report.merged.final_outcome is ExitMergeOutcome.PROTECTIVE_EXIT
++        assert report.state_updated is True
++        state = manager.get_state("alpha", "FIGI1",
++                                  config_hash=config.config_hash)
++        record = state.data["last_exit_evaluation"]
++        assert record["outcome"] == "PROTECTIVE_EXIT"
++        assert record["config_hash"] == config.config_hash
++        assert record["figi"] == "FIGI1"
++        assert record["decided_at"] == FIXED_CLOCK
++        # Существующие данные записи сохранены: updater Stage C только
++        # добавляет ключ решения выхода.
++        assert state.data["position"] == 7
++        assert state.data["note"] == "kept"

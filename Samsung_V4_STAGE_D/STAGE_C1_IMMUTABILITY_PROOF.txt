@@ -1,0 +1,211 @@
+# STAGE_C1_IMMUTABILITY_PROOF.txt
+# Stage C.1: побайтовое сравнение ДО (Stage C candidate) и ПОСЛЕ
+# (Stage C.1) КАЖДОГО файла candidate/. Изменение разрешено ТОЛЬКО
+# для:
+#   candidate/strategy_contracts.py
+#   candidate/tests/test_stage_c_exit_service.py
+
+IDENTICAL: candidate/AUDIT_GLOBAL_MUTATIONS.txt
+IDENTICAL: candidate/AUDIT_REPORT.md
+IDENTICAL: candidate/B2_TEST_RESULTS.txt
+IDENTICAL: candidate/BUY_DIFF_code_only_vs_B2_candidate.patch
+IDENTICAL: candidate/BUY_DIFF_vs_B2_candidate.patch
+IDENTICAL: candidate/BUY_TEST_RESULTS.txt
+IDENTICAL: candidate/CHANGED_FILES.md
+IDENTICAL: candidate/FULL_DIFF.patch
+IDENTICAL: candidate/FULL_PYTEST_BASELINE.txt
+IDENTICAL: candidate/FULL_PYTEST_FINAL.txt
+IDENTICAL: candidate/GLM_AUDIT_REPORT.txt
+IDENTICAL: candidate/KNOWN_LIMITATIONS.md
+IDENTICAL: candidate/MERGE_REPORT.md
+IDENTICAL: candidate/NEGATIVE_VALIDATION_BUY_TESTS.txt
+IDENTICAL: candidate/README.md
+IDENTICAL: candidate/README_АУДИТ_v2.3.1.md
+IDENTICAL: candidate/README_АУДИТ_v2.3.2.md
+IDENTICAL: candidate/README_АУДИТ_v2.3.3.md
+IDENTICAL: candidate/README_ИЗМЕНЕНИЯ.md
+IDENTICAL: candidate/REGRESSION_COMPARISON.md
+IDENTICAL: candidate/ROOT_CAUSE_ANALYSIS.md
+IDENTICAL: candidate/SAMSUNG_PRESERVED.md
+IDENTICAL: candidate/SHA256SUMS.txt
+IDENTICAL: candidate/SHA256SUMS_stage3_after.txt
+IDENTICAL: candidate/SHA256SUMS_stage3_before.txt
+IDENTICAL: candidate/SHA256SUMS_v2.3.2.txt
+IDENTICAL: candidate/SHA256SUMS_v2.3.3.txt
+IDENTICAL: candidate/SHA256_CHANGED_FILES.txt
+IDENTICAL: candidate/SHA256_PRODUCTION_FILES.txt
+IDENTICAL: candidate/TRANSFER_TABLE.md
+IDENTICAL: candidate/__init__.py
+IDENTICAL: candidate/appendix_B2_TESTS_OUTPUT.txt
+IDENTICAL: candidate/appendix_B2_V1_TESTS.txt
+IDENTICAL: candidate/appendix_B2_V2_TESTS.txt
+IDENTICAL: candidate/appendix_B2_V3_TESTS.txt
+IDENTICAL: candidate/appendix_B2_V4_TESTS.txt
+IDENTICAL: candidate/appendix_B2_V5_TESTS.txt
+IDENTICAL: candidate/appendix_B2_V6_TESTS.txt
+IDENTICAL: candidate/appendix_B2_V7_TESTS.txt
+IDENTICAL: candidate/appendix_BASELINE_FULL_PYTEST.txt
+IDENTICAL: candidate/appendix_CHANGED_FILES_B2_v1_v7.md
+IDENTICAL: candidate/appendix_FINAL_FULL_PYTEST.txt
+IDENTICAL: candidate/appendix_FULL_DIFF_B2_v1_v7.patch
+IDENTICAL: candidate/appendix_NEGATIVE_VALIDATION.txt
+IDENTICAL: candidate/appendix_README_B2_v1_v7.md
+IDENTICAL: candidate/appendix_SHA256SUMS_B2_v1_v7.txt
+IDENTICAL: candidate/appendix_TEST_RESULTS_B2_v1_v7.txt
+IDENTICAL: candidate/appendix_baseline_failed_names.txt
+IDENTICAL: candidate/appendix_final_failed_names.txt
+IDENTICAL: candidate/attribution.py
+IDENTICAL: candidate/build_safety.py
+IDENTICAL: candidate/check_config.ps1
+IDENTICAL: candidate/config.py
+IDENTICAL: candidate/conftest.py
+IDENTICAL: candidate/enable_sandbox_execution.py
+IDENTICAL: candidate/engine.json
+IDENTICAL: candidate/engine_config.py
+IDENTICAL: candidate/etap5b_test_results.txt
+IDENTICAL: candidate/execution.py
+IDENTICAL: candidate/izmenenija.diff
+IDENTICAL: candidate/izmenenija_12_padenij.patch
+IDENTICAL: candidate/izmenenija_full.diff
+IDENTICAL: candidate/izmenenija_p0_batch2.diff
+IDENTICAL: candidate/izmenenija_p0_batch4.diff
+IDENTICAL: candidate/izmenenija_p0_batch5.diff
+IDENTICAL: candidate/izmenenija_v2.3.1_to_v2.3.2.diff
+IDENTICAL: candidate/izmenenija_v2.3.2_to_v2.3.3.diff
+IDENTICAL: candidate/logger.py
+IDENTICAL: candidate/main.py
+IDENTICAL: candidate/main_console.txt
+IDENTICAL: candidate/order_ledger.py
+IDENTICAL: candidate/requirements.txt
+IDENTICAL: candidate/risk_manager.py
+IDENTICAL: candidate/run_tests.ps1
+IDENTICAL: candidate/safe_start.py
+IDENTICAL: candidate/screener.py
+IDENTICAL: candidate/strategies/__init__.py
+IDENTICAL: candidate/strategies/legacy_samsung_v4/__init__.py
+IDENTICAL: candidate/strategies/legacy_samsung_v4/params.json
+IDENTICAL: candidate/strategies/legacy_samsung_v4/profiles.py
+IDENTICAL: candidate/strategies/legacy_samsung_v4/schema.py
+IDENTICAL: candidate/strategies/legacy_samsung_v4/strategy.py
+IDENTICAL: candidate/strategy.py
+IDENTICAL: candidate/strategy_api.py
+CHANGED (allowed by Stage C.1 scope): candidate/strategy_contracts.py
+    before: 023fe255f831201f376187f7968f613323b7bc039f7d4e1be290ae393c48456c
+    after : 871d41fa29aa2670f7926c29d5ce19fbe108bedabd7379f795510321b86bb06c
+IDENTICAL: candidate/strategy_state.py
+IDENTICAL: candidate/telegram_bot.py
+IDENTICAL: candidate/test_b2_close_accounting.py
+IDENTICAL: candidate/test_b2_csv_recovery.py
+IDENTICAL: candidate/test_b2_terminal_metadata_recovery.py
+IDENTICAL: candidate/test_b2_v4_accounting_consistency.py
+IDENTICAL: candidate/test_b2_v5_identity_and_timestamp.py
+IDENTICAL: candidate/test_b2_v6_timestamp_identity_close_reason.py
+IDENTICAL: candidate/test_b2_v7_cursor_version_and_alt_timestamp.py
+IDENTICAL: candidate/test_buy_accounting_audit.py
+IDENTICAL: candidate/test_buy_registration_fix2.py
+IDENTICAL: candidate/test_buy_registration_fix2_FIX2_snapshot.py
+IDENTICAL: candidate/test_commission.py
+IDENTICAL: candidate/test_corrective_audit_v2.py
+IDENTICAL: candidate/test_corrective_audit_v3.py
+IDENTICAL: candidate/test_execution.py
+IDENTICAL: candidate/test_fail_closed.py
+IDENTICAL: candidate/test_main.py
+IDENTICAL: candidate/test_main_helpers.py
+IDENTICAL: candidate/test_manual_close_integration.py
+IDENTICAL: candidate/test_order_ledger.py
+IDENTICAL: candidate/test_p0_batch2_late_execution.py
+IDENTICAL: candidate/test_p0_defect_fixes.py
+IDENTICAL: candidate/test_p0_sell_id_fixes.py
+IDENTICAL: candidate/test_persistence.py
+IDENTICAL: candidate/test_risk_manager.py
+IDENTICAL: candidate/test_safety.py
+IDENTICAL: candidate/test_screener.py
+IDENTICAL: candidate/test_slippage.py
+IDENTICAL: candidate/test_stage1_packet_v.py
+IDENTICAL: candidate/test_stage1_s1_telemetry.py
+IDENTICAL: candidate/test_strategy.py
+IDENTICAL: candidate/test_telegram_handlers.py
+IDENTICAL: candidate/test_tinkoff_client.py
+IDENTICAL: candidate/test_tinkoff_client_currency.py
+IDENTICAL: candidate/test_trading_flag.py
+IDENTICAL: candidate/test_v232_close_defects.py
+IDENTICAL: candidate/test_v233_partial_sell_reopen_defect.py
+IDENTICAL: candidate/test_v4_integration_integrity.py
+IDENTICAL: candidate/test_v4_order_ledger_first_append.py
+IDENTICAL: candidate/test_v4_safety_build.py
+IDENTICAL: candidate/tests/__init__.py
+IDENTICAL: candidate/tests/conftest.py
+IDENTICAL: candidate/tests/fixtures/legacy_golden_signals.json
+IDENTICAL: candidate/tests/stage_a_golden_tools.py
+IDENTICAL: candidate/tests/test_buy_registration_fix2.py
+IDENTICAL: candidate/tests/test_buy_registration_fix2_FIX2_snapshot.py
+IDENTICAL: candidate/tests/test_commission.py
+IDENTICAL: candidate/tests/test_execution.py
+IDENTICAL: candidate/tests/test_fail_closed.py
+IDENTICAL: candidate/tests/test_main.py
+IDENTICAL: candidate/tests/test_main_helpers.py
+IDENTICAL: candidate/tests/test_order_ledger.py
+IDENTICAL: candidate/tests/test_p0_batch2_late_execution.py
+IDENTICAL: candidate/tests/test_p0_defect_fixes.py
+IDENTICAL: candidate/tests/test_persistence.py
+IDENTICAL: candidate/tests/test_risk_manager.py
+IDENTICAL: candidate/tests/test_safety.py
+IDENTICAL: candidate/tests/test_screener.py
+IDENTICAL: candidate/tests/test_slippage.py
+IDENTICAL: candidate/tests/test_stage_a1_attribution_explicit.py
+IDENTICAL: candidate/tests/test_stage_a1_config_immutability.py
+IDENTICAL: candidate/tests/test_stage_a2_1_context_integrity.py
+IDENTICAL: candidate/tests/test_stage_a2_config_hash_integrity.py
+IDENTICAL: candidate/tests/test_stage_a_attribution.py
+IDENTICAL: candidate/tests/test_stage_a_engine_config.py
+IDENTICAL: candidate/tests/test_stage_a_legacy_adapter.py
+IDENTICAL: candidate/tests/test_stage_a_legacy_profiles.py
+IDENTICAL: candidate/tests/test_stage_a_schema.py
+IDENTICAL: candidate/tests/test_stage_a_strategy_api.py
+IDENTICAL: candidate/tests/test_stage_b1_state_key_and_concurrency.py
+IDENTICAL: candidate/tests/test_stage_b_state_isolation.py
+IDENTICAL: candidate/tests/test_stage_c_contracts.py
+CHANGED (allowed by Stage C.1 scope): candidate/tests/test_stage_c_exit_service.py
+    before: 441d875dd734c0d254b194520e48fbb5d5e96cc25b91521c02111baa5bbc3dea
+    after : 86dcf9616299804311c85d3acdc56b261d2b8f70055e4b7b1a098ee54f554e43
+IDENTICAL: candidate/tests/test_strategy.py
+IDENTICAL: candidate/tests/test_telegram_handlers.py
+IDENTICAL: candidate/tests/test_tinkoff_client.py
+IDENTICAL: candidate/tests/test_tinkoff_client_currency.py
+IDENTICAL: candidate/tests/test_trading_flag.py
+IDENTICAL: candidate/tinkoff_client.py
+IDENTICAL: candidate/ОТЧЁТ_P0-3.md
+IDENTICAL: candidate/ОТЧЁТ_P0-4.md
+IDENTICAL: candidate/ОТЧЁТ_P0-5.md
+IDENTICAL: candidate/ОТЧЁТ_ЭТАП3_SAFETY_FIX_SELL.md
+IDENTICAL: candidate/ОТЧЁТ_устранение_12_падений_pytest.docx
+IDENTICAL: candidate/ОТЧЁТ_устранение_12_падений_pytest.pdf
+IDENTICAL: candidate/РЕЗУЛЬТАТЫ_ТЕСТОВ.txt
+IDENTICAL: candidate/РЕЗУЛЬТАТЫ_ТЕСТОВ_P0-4.txt
+IDENTICAL: candidate/РЕЗУЛЬТАТЫ_ТЕСТОВ_P0-5.txt
+IDENTICAL: candidate/РЕЗУЛЬТАТЫ_ТЕСТОВ_v2.3.2.txt
+IDENTICAL: candidate/РЕЗУЛЬТАТЫ_ТЕСТОВ_v2.3.3.txt
+IDENTICAL: candidate/план.txt
+
+Всего файлов candidate/: 177
+Побайтово идентичны: 175
+Изменены (в границах ТЗ §5): 2
+НАРУШЕНИЯ ГРАНИЦ: 0
+
+# Ключевые файлы принятых этапов (обязаны быть IDENTICAL):
+  IDENTICAL: candidate/attribution.py
+  IDENTICAL: candidate/strategy_api.py
+  IDENTICAL: candidate/strategy_state.py
+  IDENTICAL: candidate/tests/test_stage_a1_attribution_explicit.py
+  IDENTICAL: candidate/tests/test_stage_a1_config_immutability.py
+  IDENTICAL: candidate/tests/test_stage_a2_config_hash_integrity.py
+  IDENTICAL: candidate/tests/test_stage_a2_1_context_integrity.py
+  IDENTICAL: candidate/tests/test_stage_b_state_isolation.py
+  IDENTICAL: candidate/tests/test_stage_b1_state_key_and_concurrency.py
+  IDENTICAL: candidate/execution.py
+  IDENTICAL: candidate/risk_manager.py
+  IDENTICAL: candidate/main.py
+  IDENTICAL: candidate/tests/fixtures/legacy_golden_signals.json
+  IDENTICAL: candidate/strategies/legacy_samsung_v4/strategy.py
+
+ИТОГ: OK — Stage A.2.1 и Stage B.1 побайтово неизменны; торговые runtime-файлы и golden fixtures неизменны; изменены ровно два файла в границах ТЗ Stage C.1 §5

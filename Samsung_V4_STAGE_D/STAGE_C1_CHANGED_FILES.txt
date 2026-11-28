@@ -1,0 +1,28 @@
+# STAGE_C1_CHANGED_FILES.txt
+# Stage C -> Stage C.1: изменённые/добавленные файлы candidate/
+# Границы изменений ТЗ Stage C.1 §5: только strategy_contracts.py и
+# tests/test_stage_c_exit_service.py; остальные файлы candidate/
+# побайтово неизменны.
+
+Изменённые файлы candidate/ (2):
+  M candidate/strategy_contracts.py — OK (разрешено ТЗ §5)
+  M candidate/tests/test_stage_c_exit_service.py — OK (разрешено ТЗ §5)
+
+Добавленные файлы candidate/ (0):
+
+Удалённые файлы candidate/ (0):
+
+Отчётные артефакты Stage C.1, добавленные В КОРЕНЬ пакета (не код, на исполнение не влияют):
+  A IMPLEMENTATION_REPORT_STAGE_C1.md
+  A KNOWN_LIMITATIONS_STAGE_C1.md
+  A README_STAGE_C1.md
+  A ROLLBACK_INSTRUCTIONS_STAGE_C1.md
+  A STAGE_C1_NO_EXECUTION_CHANGES_PROOF.md
+  A STAGE_C1_PRE_BASELINE_FILES.txt
+  A STAGE_C1_PRE_BASELINE_SHA256.txt
+  A STAGE_C1_PRE_IMPLEMENTATION_BASELINE.md
+  A TEST_RESULTS_STAGE_C1.txt
+  A VERIFICATION_INSTRUCTIONS_STAGE_C1.md
+  A appendix_stage_c1/ (полные логи pytest ДО/ПОСЛЕ, negative-check, список новых тестов, проверка потерь)
+
+ИТОГ candidate/: OK — изменены ровно два разрешённых файла, добавленных/удалённых файлов candidate/ нет

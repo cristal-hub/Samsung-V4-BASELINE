@@ -1,0 +1,22 @@
+STAGE D — ДОКАЗАТЕЛЬСТВО ОТСУТСТВИЯ ИЗМЕНЕНИЙ BROKER/EXECUTION КОДА
+
+Сравнение byte-for-byte против Stage C.1 (pristine):
+  OK candidate/execution.py b2e63fdd386ecb9075a78310c4022ed281f793f248006531990ff174e0df725d
+  OK candidate/main.py 549ab619bf05aa3d5e25ca40eea7444ddf4bb7bf0c4fb95e28443f9658c9380b
+  OK candidate/risk_manager.py d1c72c2ee09dc877803661c25028442413ffc13b2b9168efa59f99255e5982b8
+  OK candidate/telegram_bot.py 8a98ab4c5b5fe5070813e3ac4bf0f57f592c0d9ce5483df826ad1f2cd1ca1f6e
+  OK candidate/tinkoff_client.py fe69b045e9ec3d415c43e71a0effe62fbfb38d2309d30c01d0b1d03155b569d7
+  OK candidate/screener.py 6db12eb1da4434fba2bb9997a676b86b7431b67bb0f9ae1e85b56db11d8341c9
+  OK candidate/safe_start.py 34363dada2cb67c30937e908df09413a233e5e8d82ad0cc8ed6359532af97703
+  OK candidate/order_ledger.py 4991f35ad2f2d38e96a500fbef9f3b6149bd916684a1364ab6be811a39bed783
+  OK candidate/build_safety.py 0d47bcc97031f006114ae984b0de5028b372aa9cdc52fcc490608b4a9b333815
+  OK candidate/enable_sandbox_execution.py 628eb3fc44fc831b2c77420d4a55fd5246f0742be0de793fa1907ee63ab0f535
+  OK candidate/config.py 6c4df6e4768b31b78e1daa1cbbe0e2961d5de68918f5856888e2c1be8422afae
+  OK candidate/engine_config.py 1d60714016362d5525d0fa0cdef1706df24bbb9ccd2390bcfd5e19f072b88faf
+  OK candidate/strategy.py 43906866a226aabae0fff266dde77d88345ae27f87b0948689929aa37171537f
+
+— Проверка новых файлов Stage D на broker/SDK-маркеры (уровень КОДА: импорты и вызовы; упоминания в документации запретов не считаются) —
+  strategy_risk.py: чисто
+  tests/test_stage_d_strategy_risk.py: чисто
+
+ВЫВОД: broker/execution/runtime код НЕ затронут; в новых файлах Stage D нет брокерских импортов, заявок, Sandbox/LIVE-доступа.
