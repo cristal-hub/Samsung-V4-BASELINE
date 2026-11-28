@@ -1,0 +1,31 @@
+STAGE E — SHA-256 MANIFEST ПОСТАВКИ
+База: Stage D.1; Stage E добавляет только перечисленные новые файлы.
+
+--- НОВЫЕ ФАЙЛЫ STAGE E (16) ---
+725b0c038499b13556000f7bf3a3577f6d81d7edc8b769dbccf49d1c5ebebb8c  candidate/historical_engine/__init__.py
+55ad69ca0602eb07699bcb7a09d1b0e4cb2a1360eb12bb679c7e6fe52eb637d0  candidate/historical_engine/models.py
+bdeed50665affe67023b920d7f73632af8ecb5e590349bd2df2957d968870784  candidate/historical_engine/data_feed.py
+b12ccf73414db8e960e93abb2a341ea8ce8773c8c1b8e28fba5cadb1c4ec0fc3  candidate/historical_engine/ledger.py
+467899281f4d111e615edd79ea0e8b364794d91477b4a3d444962bbd181e7d91  candidate/historical_engine/risk_integration.py
+ec2cf9f47bc574fe40be420092d64e6a5c2e002d348978c2c99d54276767769a  candidate/historical_engine/execution.py
+79ad78b75f5e962c9c07d9d5d88758d85d138fd7068ffafaeda4c3a5fe9cf3a6  candidate/historical_engine/strategy_runner.py
+5392eba3701ee6993cee91d9d3dd22146a7b23c446b6af084a3c1104c7c89a54  candidate/historical_engine/event_engine.py
+18b80b0dc97f1c20eb1381bb9fe8259722ac6699f3ad60cd3cb34c256c86caed  candidate/historical_engine/report.py
+a3dbeb5c493fd228aea7c4148dc0e65a42c9acc2526b40aa7e698188e261713e  candidate/historical_engine/engine.py
+51d0946d16380e1908e8adca7200d69b934ae986e1f4d0dfca58da1b2dd0015e  candidate/tests/stage_e_tools.py
+dbd4155a2d06a2ba32775625f56237d0675b65a5b4b16632dd96e4ddf863472a  candidate/tests/test_stage_e_data_feed.py
+dc906b3e4fdfac5efe8da00324b7b2c0e979a3b51863c353553afa7c7164fd73  candidate/tests/test_stage_e_engine_decisions.py
+898071e2dd04bc5a8e95d6926d97f54daa6335f57769ba10ebfd4dbf15600295  candidate/tests/test_stage_e_execution_ledger.py
+c1a6cddaad3d8ed07012c7f3580a2658b6dc221dbcac37be4cad9604029964b3  candidate/tests/test_stage_e_integration.py
+306ad6b63e89becb94b6c5af64d03bfd710c6e0ca64fb29e770ecfcede3d3956  candidate/tests/test_stage_e_report.py
+
+--- КОНТРОЛЬ ПРИНЯТЫХ ФАЙЛОВ (выборочно, совпадение с Stage D.1) ---
+7f25b4ef4bf9f2f9b90507caf7b4ff53a20b95f987c337bbf3d95496bcd22d66  candidate/strategy_risk.py  (совпадает с Stage D.1)
+0cade2967f68fc5bad648460adbec593dbe97a0fbc0771e7130fe2be0915ddf9  candidate/tests/test_stage_d_strategy_risk.py  (совпадает с Stage D.1)
+871d41fa29aa2670f7926c29d5ce19fbe108bedabd7379f795510321b86bb06c  candidate/strategy_contracts.py  (совпадает с Stage D.1)
+94330280e6c64c84aad8c75f1c4bd2099624b8b477e4e7682646ad266b33d3ee  candidate/strategy_api.py  (совпадает с Stage D.1)
+e2f2b981db1b0f978aa9cba6e2f213f3074cb6078e85052d02f419376740ef0d  candidate/strategy_state.py  (совпадает с Stage D.1)
+0e77b0e25f773650c5a43b5d7bd72527e10fe82bd3c985282445cc51c65c2688  candidate/attribution.py  (совпадает с Stage D.1)
+b2e63fdd386ecb9075a78310c4022ed281f793f248006531990ff174e0df725d  candidate/execution.py  (совпадает с Stage D.1)
+549ab619bf05aa3d5e25ca40eea7444ddf4bb7bf0c4fb95e28443f9658c9380b  candidate/main.py  (совпадает с Stage D.1)
+d1c72c2ee09dc877803661c25028442413ffc13b2b9168efa59f99255e5982b8  candidate/risk_manager.py  (совпадает с Stage D.1)

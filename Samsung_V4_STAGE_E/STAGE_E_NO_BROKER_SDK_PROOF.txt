@@ -1,0 +1,27 @@
+STAGE E — ПОДТВЕРЖДЕНИЕ ОТСУТСТВИЯ БРОКЕРСКИХ SDK И СЕТЕВЫХ ВЫЗОВОВ
+
+Метод: статический скан всех 16 новых файлов по 24 шаблонам
+(t_tech/tinkoff/requests/urllib/socket/grpc/aiohttp/websocket/httpx/
+telegram/smtplib/FORCE_TRADE/post_order/execution/main/risk_manager/
+sandbox/live/datetime.now/time/random/os.environ/uuid/subprocess).
+Запретительные комментарии («никаких Sandbox/LIVE...») распознаются
+и не считаются использованием.
+
+[OK]   candidate/historical_engine/__init__.py
+[OK]   candidate/historical_engine/models.py
+[OK]   candidate/historical_engine/data_feed.py
+[OK]   candidate/historical_engine/ledger.py
+[OK]   candidate/historical_engine/risk_integration.py
+[OK]   candidate/historical_engine/execution.py
+[OK]   candidate/historical_engine/strategy_runner.py
+[OK]   candidate/historical_engine/event_engine.py
+[OK]   candidate/historical_engine/report.py
+[OK]   candidate/historical_engine/engine.py
+[OK]   candidate/tests/stage_e_tools.py
+[OK]   candidate/tests/test_stage_e_data_feed.py
+[OK]   candidate/tests/test_stage_e_engine_decisions.py
+[OK]   candidate/tests/test_stage_e_execution_ledger.py
+[OK]   candidate/tests/test_stage_e_integration.py
+[OK]   candidate/tests/test_stage_e_report.py
+
+ВЫВОД: в новых файлах Stage E нет брокерских SDK, сетевых вызовов, размещения заявок, Sandbox/LIVE, FORCE_TRADE, системного времени, случайности и зависимостей от окружения.

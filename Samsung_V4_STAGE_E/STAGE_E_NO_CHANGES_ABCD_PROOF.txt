@@ -1,0 +1,29 @@
+STAGE E — ПОДТВЕРЖДЕНИЕ ОТСУТСТВИЯ ИЗМЕНЕНИЙ STAGE A/B/C/D
+
+Метод: побайтовое сравнение (SHA-256) ВСЕХ файлов дерева candidate
+с принятым состоянием Stage D.1.
+
+Файлов в базе (Stage D.1): 292
+Файлов в дереве Stage E:   308
+Изменено существующих:     0
+Удалено:                   0
+Добавлено новых:           16
+  ADDED: candidate/historical_engine/__init__.py
+  ADDED: candidate/historical_engine/data_feed.py
+  ADDED: candidate/historical_engine/engine.py
+  ADDED: candidate/historical_engine/event_engine.py
+  ADDED: candidate/historical_engine/execution.py
+  ADDED: candidate/historical_engine/ledger.py
+  ADDED: candidate/historical_engine/models.py
+  ADDED: candidate/historical_engine/report.py
+  ADDED: candidate/historical_engine/risk_integration.py
+  ADDED: candidate/historical_engine/strategy_runner.py
+  ADDED: candidate/tests/stage_e_tools.py
+  ADDED: candidate/tests/test_stage_e_data_feed.py
+  ADDED: candidate/tests/test_stage_e_engine_decisions.py
+  ADDED: candidate/tests/test_stage_e_execution_ledger.py
+  ADDED: candidate/tests/test_stage_e_integration.py
+  ADDED: candidate/tests/test_stage_e_report.py
+Новые файлы вне разрешённых путей Stage E: 0
+
+ВЫВОД: ИЗМЕНЕНИЙ ПРИНЯТЫХ ФАЙЛОВ НЕТ: все файлы Stage A/B/C/D совпадают байт-в-байт (SHA-256); добавлены только новые файлы Stage E.

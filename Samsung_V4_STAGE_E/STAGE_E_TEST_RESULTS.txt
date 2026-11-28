@@ -1,0 +1,29 @@
+STAGE E — РЕЗУЛЬТАТЫ ТЕСТИРОВАНИЯ (offline-only)
+
+Снапшот ДО изменений (Stage D.1, дерево заморожено до правок):
+  FULL pytest:      1570 passed in 23.12s
+  CANONICAL pytest: 1050 passed in 11.71s
+
+ПОСЛЕ Stage E (новое дерево с 16 новыми файлами):
+  FULL pytest:      1650 passed in 25.17s
+  CANONICAL pytest: 1130 passed in 14.77s
+  verbose-итог:     ============================ 1650 passed in 26.36s =============================
+
+Дельта: full 1570 -> 1650 (+80), canonical 1050 -> 1130 (+80).
+failed: 0; skipped: 0; errors: 0 (в обоих наборах).
+
+No-test-loss (по-тестовая сверка verbose-логов full):
+  тестов до: 1570 PASSED; после: 1650 PASSED;
+  потеряно: 0; добавлено: ровно 80 тестов Stage E:
+    tests/test_stage_e_data_feed.py          24
+    tests/test_stage_e_engine_decisions.py   15
+    tests/test_stage_e_execution_ledger.py   25
+    tests/test_stage_e_integration.py         6
+    tests/test_stage_e_report.py             10
+
+Ни один старый тест не удалён, не ослаблен и не пропущен.
+
+Обязательные категории ТЗ §9 — все покрыты тестами Stage E:
+хронологический порядок; отсутствие look-ahead bias; детерминизм повторного запуска; корректность входа и выхода; комиссии; проскальзывание; гэпы; Stop Loss; Take Profit; конфликт SL/TP внутри одной свечи; размер лота; недостаточный капитал; недостаточная покупательная способность; LONG/SHORT; некорректные данные; пропущенные свечи; отсутствие будущих данных; интеграция со Stage D; изоляция стратегий; корректность PortfolioLedger; расчёт итоговой статистики.
+
+Полный verbose-лог pytest — в поставке: STAGE_E_PYTEST_FULL_LOG.txt
