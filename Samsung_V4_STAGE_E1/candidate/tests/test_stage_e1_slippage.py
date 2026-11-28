@@ -5,7 +5,11 @@
 # 12 обязательных сценариев ТЗ E.1 §4.5 + дополнительные проверки
 # обратной совместимости полей отчёта и детерминизма + FINAL CORRECTIONS
 # (валидация конечности всех числовых аргументов split_execution_deviation
-# через math.isfinite: NaN / ±Infinity / нули / отрицательные отклоняются).
+# через math.isfinite: NaN / ±Infinity / нули / отрицательные отклоняются)
+# + FINAL NUMERIC OVERFLOW GUARD (защита ПРОМЕЖУТОЧНЫХ результатов от
+# переполнения: size, adverse_slippage_cost, favorable_price_improvement
+# обязаны быть конечными; переполнение -> ExecutionError; возврат inf/nan
+# невозможен).
 # Только исторические синтетические данные, только оффлайн.
 
 from __future__ import annotations
@@ -630,3 +634,100 @@ def test_finite_valid_arguments_produce_unchanged_formulas():
     assert _split(side=SIDE_SELL, reference_price=100,
                   execution_price=99, quantity=2,
                   contract_multiplier=1) == (2.0, 0.0)
+
+
+# --- FINAL NUMERIC OVERFLOW GUARD: защита промежуточных результатов -----------
+#
+# Требование: аргументы по отдельности конечны (проверка выше), но
+# ПРОМЕЖУТОЧНЫЕ результаты обязаны проверяться на конечность ДО возврата:
+#   1) size = quantity * contract_multiplier;
+#   2) adverse_slippage_cost = size * adverse_delta;
+#   3) favorable_price_improvement = size * (-adverse_delta).
+# Произведение конечных аргументов может переполниться до ±Infinity
+# (пример ТЗ: quantity = 10**300, contract_multiplier = 1e100).
+# Переполнение или нечисловой результат -> ExecutionError; возвращать
+# inf/nan ЗАПРЕЩЕНО. Формулы adverse slippage и favorable price
+# improvement, порядок корректных float-операций и экономическая модель
+# НЕ изменены.
+
+
+# 1. Переполнение size = quantity * contract_multiplier -------------------------
+
+def test_size_overflow_rejected():
+    # 10**300 и 1e100 конечны по отдельности (isfinite проходит),
+    # но произведение 1e400 переполняется до +Infinity.
+    assert math.isfinite(float(10 ** 300)) and math.isfinite(1e100)
+    with pytest.raises(ExecutionError):
+        _split(quantity=10 ** 300, contract_multiplier=1e100)
+
+
+# 2. Переполнение adverse_slippage_cost при конечных аргументах -----------------
+
+def test_adverse_slippage_cost_overflow_rejected():
+    # Все аргументы конечны и валидны: size = 1e155, adverse_delta = 1e155;
+    # произведение 1e310 переполняется до +Infinity -> ExecutionError
+    # (покупка: исполнение выше reference — неблагоприятное отклонение).
+    assert math.isfinite(float(10 ** 155))
+    assert math.isfinite(1e155)
+    assert math.isfinite(2e155)
+    with pytest.raises(ExecutionError):
+        _split(side=SIDE_BUY, reference_price=1e155, execution_price=2e155,
+               quantity=10 ** 155, contract_multiplier=1.0)
+
+
+# 3. Переполнение favorable_price_improvement при конечных аргументах -----------
+
+def test_favorable_price_improvement_overflow_rejected():
+    # Зеркальный случай: продажа с исполнением ВЫШЕ reference —
+    # улучшение цены; произведение 1e310 переполняется -> ExecutionError.
+    with pytest.raises(ExecutionError):
+        _split(side=SIDE_SELL, reference_price=1e155, execution_price=2e155,
+               quantity=10 ** 155, contract_multiplier=1.0)
+
+
+# 4. Обычные корректные значения дают прежний результат -------------------------
+
+def test_normal_values_unchanged_by_overflow_guard():
+    # Защита переполнения не меняет результаты для обычных валидных
+    # входов: формулы и порядок float-операций прежние (точное равенство).
+    assert _split() == (10 * 1.0 * 0.5, 0.0)
+    assert _split(side=SIDE_SELL) == (0.0, 10 * 1.0 * 0.5)
+    assert _split(execution_price=100.0) == (0.0, 0.0)
+    assert _split(contract_multiplier=2.5) == (10 * 2.5 * 0.5, 0.0)
+    assert _split(side=SIDE_SELL, execution_price=99.5,
+                  quantity=4, contract_multiplier=2.0) == \
+        (4 * 2.0 * 0.5, 0.0)
+
+
+# 5. Результат всегда конечные неотрицательные числа -----------------------------
+
+def test_results_always_finite_and_non_negative():
+    # Для набора валидных сценариев (обычный adverse, точное совпадение
+    # цен, улучшение цены, большие конечные значения, субнормальные с
+    # недопотоком) результат ВСЕГДА содержит только конечные
+    # неотрицательные числа без NaN и ±Infinity.
+    scenarios = [
+        # обычный сценарий (adverse при покупке)
+        dict(side=SIDE_BUY, reference_price=100.0, execution_price=100.5,
+             quantity=10, contract_multiplier=1.0),
+        # точное совпадение цен — обе величины нулевые
+        dict(side=SIDE_BUY, reference_price=100.0, execution_price=100.0,
+             quantity=10, contract_multiplier=1.0),
+        # улучшение цены при продаже
+        dict(side=SIDE_SELL, reference_price=100.0, execution_price=100.5,
+             quantity=10, contract_multiplier=1.0),
+        # большие, но конечные значения: произведение остаётся конечным
+        dict(side=SIDE_BUY, reference_price=1e150, execution_price=1.5e150,
+             quantity=10 ** 150, contract_multiplier=1.0),
+        # субнормальные значения: недопоток даёт 0.0 (конечно, >= 0)
+        dict(side=SIDE_BUY, reference_price=5e-324, execution_price=1e-320,
+             quantity=1, contract_multiplier=1e-300),
+    ]
+    for case in scenarios:
+        adverse, improvement = split_execution_deviation(**case)
+        for name, value in (("adverse_slippage_cost", adverse),
+                            ("favorable_price_improvement", improvement)):
+            assert isinstance(value, float), (case, name)
+            assert math.isfinite(value), (case, name)   # не inf и не nan
+            assert not math.isnan(value), (case, name)
+            assert value >= 0.0, (case, name)

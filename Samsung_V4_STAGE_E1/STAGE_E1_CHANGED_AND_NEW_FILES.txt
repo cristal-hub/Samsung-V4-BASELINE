@@ -1,28 +1,44 @@
-STAGE E.1 (ФИНАЛЬНЫЕ ПРАВКИ) — ИЗМЕНЁННЫЕ И НОВЫЕ ФАЙЛЫ (SHA-256)
+STAGE E.1 — ИЗМЕНЁННЫЕ И НОВЫЕ ФАЙЛЫ (SHA-256)
 
-== РАУНД 2: ФИНАЛЬНЫЕ ПРАВКИ ( Correction 1 — покрытие всей серии;
-   Correction 2 — валидация чисел math.isfinite ) ==
+== РАУНД 3: FINAL NUMERIC OVERFLOW GUARD (защита промежуточных
+   результатов split_execution_deviation от арифметического
+   переполнения; формулы и порядок float-операций НЕ изменены) ==
 
-База сравнения: первоначальная поставка Samsung_V4_STAGE_E1
-(/home/z/my-project/work/stage_e1_work/Samsung_V4_STAGE_E1/candidate)
+База сравнения: состояние поставки после раунда 2 (финальных правок)
+(/home/z/my-project/work/stage_e1_work/Samsung_V4_STAGE_E1_round2_snapshot)
 финальное дерево: /home/z/my-project/work/stage_e1_work/working_candidate
 
-== ИЗМЕНЁННЫЕ (5) — новых файлов нет, удалённых нет ==
-[MODIFIED] candidate/historical_engine/calendar.py
+== ИЗМЕНЁННЫЕ (2) — новых файлов нет, удалённых нет ==
+[MODIFIED@GUARD] candidate/historical_engine/execution.py
+    SHA-256 ДО  (после раунда 2): 93ba848fe44d89e636f99d467427cae325a63b613f11f7ae12f2de88cfc8a322
+    SHA-256 ПОСЛЕ (раунд 3):      aeaafa31f343dbef0fc987439a885a92817c039cd28fdf85b252c94416dd63da
+[MODIFIED@GUARD] candidate/tests/test_stage_e1_slippage.py
+    SHA-256 ДО  (после раунда 2): 7c4c69659652d5ecdfc6781af470ef643e44a6bf6e00a541054ea06681ef3791
+    SHA-256 ПОСЛЕ (раунд 3):      24acf8e9987a7efe8fe6080a01740b5c4a1bb6b8751fcb7c932c3648f73f2e9c
+
+== РАУНД 2 (справочно): ФИНАЛЬНЫЕ ПРАВКИ (Correction 1 — покрытие
+   всей серии; Correction 2 — валидация чисел math.isfinite)
+   относительно ПЕРВОНАЧАЛЬНОЙ поставки E.1 ==
+
+База сравнения: первоначальная поставка Samsung_V4_STAGE_E1
+(/home/z/my-project/work/stage_e1_work/Samsung_V4_STAGE_E1_original)
+
+== ИЗМЕНЁННЫЕ в раунде 2 (5) ==
+[MODIFIED@финал] candidate/historical_engine/calendar.py
     SHA-256 ДО  (поставка E.1): 66ba8629cfbb4f567438cab15dd5d9fc96608027a66d425a44dc484bce8ade11
-    SHA-256 ПОСЛЕ (финал):      1959fb9b10476741bf2695ad60f1e06670a698b2ecb3bb27c47fd8b140c768d5
-[MODIFIED] candidate/historical_engine/data_feed.py
+    SHA-256 ПОСЛЕ (раунд 3):    1959fb9b10476741bf2695ad60f1e06670a698b2ecb3bb27c47fd8b140c768d5
+[MODIFIED@финал] candidate/historical_engine/data_feed.py
     SHA-256 ДО  (поставка E.1): 627b69f343d2d85e0b9205eab7aa36de0f0152b3c25be45489b27c03566bda06
-    SHA-256 ПОСЛЕ (финал):      ff4445cfade91b7bdecf5237ce1a1efe5aae0c0969049091ed9e62f48ca899e1
-[MODIFIED] candidate/historical_engine/execution.py
+    SHA-256 ПОСЛЕ (раунд 3):    ff4445cfade91b7bdecf5237ce1a1efe5aae0c0969049091ed9e62f48ca899e1
+[MODIFIED@финал] candidate/historical_engine/execution.py
     SHA-256 ДО  (поставка E.1): be18ecbcd38f705aca8f8e2a52f76c13cf584263f9b52dd36fdc54d3db428a67
-    SHA-256 ПОСЛЕ (финал):      93ba848fe44d89e636f99d467427cae325a63b613f11f7ae12f2de88cfc8a322
-[MODIFIED] candidate/tests/test_stage_e1_calendar.py
+    SHA-256 ПОСЛЕ (раунд 3):    aeaafa31f343dbef0fc987439a885a92817c039cd28fdf85b252c94416dd63da
+[MODIFIED@финал] candidate/tests/test_stage_e1_calendar.py
     SHA-256 ДО  (поставка E.1): 211aa4c8da57b2ceda07861fbaf51129b8add5724ef84e3aeb1b0a75555e1023
-    SHA-256 ПОСЛЕ (финал):      7ae405df39d700929abaad876f111f6d4e0d5a3f71a0aa86aafc6c82bd7d68d2
-[MODIFIED] candidate/tests/test_stage_e1_slippage.py
+    SHA-256 ПОСЛЕ (раунд 3):    7ae405df39d700929abaad876f111f6d4e0d5a3f71a0aa86aafc6c82bd7d68d2
+[MODIFIED@финал] candidate/tests/test_stage_e1_slippage.py
     SHA-256 ДО  (поставка E.1): 3eaf5026a89c42cd0cd4a99ca10e0bcd2782237d274f5816b4a5f232360de1b0
-    SHA-256 ПОСЛЕ (финал):      7c4c69659652d5ecdfc6781af470ef643e44a6bf6e00a541054ea06681ef3791
+    SHA-256 ПОСЛЕ (раунд 3):    24acf8e9987a7efe8fe6080a01740b5c4a1bb6b8751fcb7c932c3648f73f2e9c
 
 == РАУНД 1 (справочно): накопленное состояние относительно
    ПРИНЯТОГО STAGE E ==
@@ -33,36 +49,37 @@ STAGE E.1 (ФИНАЛЬНЫЕ ПРАВКИ) — ИЗМЕНЁННЫЕ И НОВЫ
 == ИЗМЕНЁННЫЕ в раунде 1 (7) ==
 [MODIFIED@E.1] candidate/historical_engine/__init__.py
     SHA-256 (Stage E):  725b0c038499b13556000f7bf3a3577f6d81d7edc8b769dbccf49d1c5ebebb8c
-    SHA-256 (финал):    73de9c3e3bca48cc37f19bda3f8b4775ac869023a9edd65946aa14f84403bfd0
+    SHA-256 (раунд 3):  73de9c3e3bca48cc37f19bda3f8b4775ac869023a9edd65946aa14f84403bfd0
 [MODIFIED@E.1] candidate/historical_engine/models.py
     SHA-256 (Stage E):  55ad69ca0602eb07699bcb7a09d1b0e4cb2a1360eb12bb679c7e6fe52eb637d0
-    SHA-256 (финал):    31d767c4db454af0fef2cfd82a76bc9781fcd1fe64025cc31ac3b95f345c70fe
+    SHA-256 (раунд 3):  31d767c4db454af0fef2cfd82a76bc9781fcd1fe64025cc31ac3b95f345c70fe
 [MODIFIED@E.1] candidate/historical_engine/data_feed.py
     SHA-256 (Stage E):  bdeed50665affe67023b920d7f73632af8ecb5e590349bd2df2957d968870784
-    SHA-256 (финал):    ff4445cfade91b7bdecf5237ce1a1efe5aae0c0969049091ed9e62f48ca899e1
+    SHA-256 (раунд 3):  ff4445cfade91b7bdecf5237ce1a1efe5aae0c0969049091ed9e62f48ca899e1
 [MODIFIED@E.1] candidate/historical_engine/ledger.py
     SHA-256 (Stage E):  b12ccf73414db8e960e93abb2a341ea8ce8773c8c1b8e28fba5cadb1c4ec0fc3
-    SHA-256 (финал):    a9cba109cc378607f4d7493532533bce600ae9668e6682af9392014bc3d1e026
+    SHA-256 (раунд 3):  a9cba109cc378607f4d7493532533bce600ae9668e6682af9392014bc3d1e026
 [MODIFIED@E.1] candidate/historical_engine/execution.py
     SHA-256 (Stage E):  ec2cf9f47bc574fe40be420092d64e6a5c2e002d348978c2c99d54276767769a
-    SHA-256 (финал):    93ba848fe44d89e636f99d467427cae325a63b613f11f7ae12f2de88cfc8a322
+    SHA-256 (раунд 3):  aeaafa31f343dbef0fc987439a885a92817c039cd28fdf85b252c94416dd63da
 [MODIFIED@E.1] candidate/historical_engine/report.py
     SHA-256 (Stage E):  18b80b0dc97f1c20eb1381bb9fe8259722ac6699f3ad60cd3cb34c256c86caed
-    SHA-256 (финал):    ba956324c5206227243f109e269705ae97bb9948bff25e30a7d4ccca5c4a4034
+    SHA-256 (раунд 3):  ba956324c5206227243f109e269705ae97bb9948bff25e30a7d4ccca5c4a4034
 [MODIFIED@E.1] candidate/historical_engine/engine.py
     SHA-256 (Stage E):  a3dbeb5c493fd228aea7c4148dc0e65a42c9acc2526b40aa7e698188e261713e
-    SHA-256 (финал):    00d9601dcd2f4348d55fe066fa3b466b31dc85631fab0a062b7c5cb706aaec3b
+    SHA-256 (раунд 3):  00d9601dcd2f4348d55fe066fa3b466b31dc85631fab0a062b7c5cb706aaec3b
 
 == НОВЫЕ в раунде 1 (4) ==
 [ADDED@E.1] candidate/historical_engine/calendar.py
-    SHA-256 (финал):    1959fb9b10476741bf2695ad60f1e06670a698b2ecb3bb27c47fd8b140c768d5
+    SHA-256 (раунд 3):  1959fb9b10476741bf2695ad60f1e06670a698b2ecb3bb27c47fd8b140c768d5
 [ADDED@E.1] candidate/tests/test_stage_e1_calendar.py
-    SHA-256 (финал):    7ae405df39d700929abaad876f111f6d4e0d5a3f71a0aa86aafc6c82bd7d68d2
+    SHA-256 (раунд 3):  7ae405df39d700929abaad876f111f6d4e0d5a3f71a0aa86aafc6c82bd7d68d2
 [ADDED@E.1] candidate/tests/test_stage_e1_slippage.py
-    SHA-256 (финал):    7c4c69659652d5ecdfc6781af470ef643e44a6bf6e00a541054ea06681ef3791
+    SHA-256 (раунд 3):  24acf8e9987a7efe8fe6080a01740b5c4a1bb6b8751fcb7c932c3648f73f2e9c
 [ADDED@E.1] candidate/tests/test_stage_e1_config_consistency.py
-    SHA-256 (финал):    7e43845713997eb98060703c520100d292d54be0876da751e26c28e6520e7df0
+    SHA-256 (раунд 3):  7e43845713997eb98060703c520100d292d54be0876da751e26c28e6520e7df0
 
-ИТОГ: раунд 2 — изменено 5, добавлено 0, удалено 0; файлы вне
-перечня совпадают байт-в-байт с первоначальной поставкой E.1
-(и, для файлов вне зоны Stage E/E.1, — с принятым Stage E).
+ИТОГ: раунд 3 — изменено 2, добавлено 0, удалено 0; раунд 2 —
+изменено 5, добавлено 0, удалено 0; раунд 1 — изменено 7, добавлено 4.
+Файлы вне перечня совпадают байт-в-байт с состоянием предыдущего
+раунда (и, для файлов вне зоны Stage E/E.1, — с принятым Stage E).

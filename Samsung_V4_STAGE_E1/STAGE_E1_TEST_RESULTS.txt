@@ -1,76 +1,70 @@
-STAGE E.1 (ФИНАЛЬНЫЕ ПРАВКИ) — РЕЗУЛЬТАТЫ РЕГРЕССИОННЫХ ТЕСТОВ
-==============================================================
+STAGE E.1 (РАУНД 3: ЗАЩИТА ОТ ЧИСЛОВОГО ПЕРЕПОЛНЕНИЯ) — РЕЗУЛЬТАТЫ
+РЕГРЕССИОННЫХ ТЕСТОВ
+====================================================================
 
-РАУНД 2: Correction 1 — покрытие календарём ВСЕЙ серии (границы серии);
-         Correction 2 — валидация конечности чисел math.isfinite().
-База сравнения: первоначальная поставка Samsung_V4_STAGE_E1 (1696/1176).
+РАУНД 3: FINAL NUMERIC OVERFLOW GUARD — конечность ПРОМЕЖУТОЧНЫХ
+         результатов split_execution_deviation (size = quantity *
+         contract_multiplier; adverse_slippage_cost;
+         favorable_price_improvement) проверяется до возврата;
+         переполнение -> ExecutionError; возврат inf/nan невозможен.
+         Формулы и порядок корректных float-операций НЕ изменены.
+База сравнения: состояние после раунда 2 (финальные правки) — 1728/1208.
 
 УСЛОВИЯ ПРОГОНА
   Полностью офлайн: синтетические данные, виртуальное исполнение,
   ни одного сетевого запроса / брокерского SDK / Sandbox / LIVE ордера.
 
 СЧЁТЧИКИ (python -m pytest из корня candidate)
-  КАНОНИЧЕСКИЙ (tests/):  ДО  1176 passed in 13.52s
-                          ПОСЛЕ  1208 passed in 14.61s
-  ПОЛНЫЙ (всё дерево):    ДО  1696 passed in 24.61s
-                          ПОСЛЕ  1728 passed in 26.29s
-  verbose-итог полного:  ============================ 1728 passed in 26.23s =============================
+  КАНОНИЧЕСКИЙ (tests/):  ДО  1208 passed in 13.88s
+                          ПОСЛЕ  1213 passed in 14.53s
+  ПОЛНЫЙ (всё дерево):    ДО  1728 passed in 24.51s
+                          ПОСЛЕ  1733 passed in 26.54s
+  verbose-итог полного:  ============================ 1733 passed in 27.83s =============================
 
   Отдельные группы (ПОСЛЕ):
-    все тесты Stage E + Stage E.1:  158 passed in 3.93s
-    все тесты Stage A–D:            799 passed in 5.86s
+    новый файл test_stage_e1_slippage.py целиком:  44 passed in 0.46s
+    новый файл test_stage_e1_calendar.py целиком:  28 passed in 0.46s
+    все тесты Stage E + Stage E.1:  163 passed in 3.72s
+    все тесты Stage A–D:            799 passed in 6.56s
 
-  Дельта: full 1696 -> 1728 (+32), canonical 1176 -> 1208 (+32).
+  Дельта: full 1728 -> 1733 (+5), canonical 1208 -> 1213 (+5).
   0 failed, 0 skipped-изменений, 0 удалённых/ослабленных тестов.
 
 NO-TEST-LOSS (сравнение ID тестов ДО/ПОСЛЕ, нормализованные ID с учётом
-каталога tests/ vs корень; см. рабочий артефакт no-test-loss)
-  Тестов ДО:  1696 (tests/: 1176, root: 520)
-  Тестов ПОСЛЕ: 1728 (tests/: 1208, root: 520)
+каталога tests/ vs корень; stage_e1g_no_test_loss_check.txt)
+  Тестов ДО:  1728 (tests/: 1208, root: 520)
+  Тестов ПОСЛЕ: 1733 (tests/: 1213, root: 520)
   ПОТЕРЯНО: 0
-  ДОБАВЛЕНО: 32
+  ДОБАВЛЕНО: 5
 
-НОВЫЕ ТЕСТЫ (32)
-
-Correction 1 — ФИНАЛЬНЫЕ ПРАВКИ: покрытие ВСЕЙ серии (9)
-  1. вся серия вне календарного покрытия              test_series_entirely_outside_calendar_coverage_reports_partial
-  2. начало серии вне покрытия                        test_series_start_outside_coverage_reports_partial
-  3. конец серии вне покрытия                         test_series_end_outside_coverage_reports_partial
-  4. серия полностью покрыта (статус FULL сохранён)   test_series_fully_covered_boundary_check_keeps_full_status
-  5. без пропусков, но даты серии вне покрытия        test_contiguous_series_without_gaps_but_uncovered_dates_is_partial
-  6. выходные/перерывы обрабатываются как прежде      test_weekends_and_session_breaks_unchanged_after_boundary_check
-  7. STRICT не отклоняет неподтверждённое             test_strict_does_not_reject_series_outside_coverage
-  8. детерминизм граничных инцидентов                 test_boundary_coverage_incidents_are_deterministic
-  9. статус PARTIAL доходит до отчёта прогона         test_report_reflects_partial_status_for_uncovered_series
-
-Correction 2 — ФИНАЛЬНЫЕ ПРАВКИ: валидация чисел math.isfinite (23)
-  reference_price: NaN / +Inf (регрессия: прежде проходил) / -Inf / ноль / отрицательное
-      test_reference_price_nan_rejected, test_reference_price_plus_inf_rejected,
-      test_reference_price_minus_inf_rejected, test_reference_price_zero_rejected,
-      test_reference_price_negative_rejected
-  execution_price: те же 5 случаев
-      test_execution_price_nan_rejected, test_execution_price_plus_inf_rejected,
-      test_execution_price_minus_inf_rejected, test_execution_price_zero_rejected,
-      test_execution_price_negative_rejected
-  contract_multiplier: те же 5 случаев
-      test_contract_multiplier_nan_rejected, test_contract_multiplier_plus_inf_rejected,
-      test_contract_multiplier_minus_inf_rejected, test_contract_multiplier_zero_rejected,
-      test_contract_multiplier_negative_rejected
-  quantity: ноль / отрицательное / bool / не-int float / NaN float / Inf float /
-            переполнение int (не представим конечным float)
-      test_quantity_zero_rejected, test_quantity_negative_rejected,
-      test_quantity_bool_rejected, test_quantity_float_non_integer_rejected,
-      test_quantity_nan_float_rejected, test_quantity_inf_float_rejected,
-      test_quantity_overflow_int_rejected
-  валидные конечные значения: формулы НЕ изменены
-      test_finite_valid_arguments_produce_unchanged_formulas
+НОВЫЕ ТЕСТЫ (5) — FINAL NUMERIC OVERFLOW GUARD
+  1. переполнение size = quantity * contract_multiplier
+     (10**300 * 1e100 -> inf; пример ТЗ)
+         test_size_overflow_rejected
+  2. переполнение adverse_slippage_cost при конечных аргументах
+     (size = 1e155, delta = 1e155, произведение 1e310 -> inf)
+         test_adverse_slippage_cost_overflow_rejected
+  3. переполнение favorable_price_improvement при конечных аргументах
+     (зеркальный случай для улучшения цены)
+         test_favorable_price_improvement_overflow_rejected
+  4. обычные корректные значения дают прежний результат
+     (точное равенство: формулы и порядок float-операций не изменены)
+         test_normal_values_unchanged_by_overflow_guard
+  5. результат всегда — только конечные неотрицательные числа
+     (обычный adverse / точное совпадение / improvement / большие
+     конечные значения / субнормальные с недопотоком в 0.0)
+         test_results_always_finite_and_non_negative
+  Все тесты переполнения проверяют ИМЕННО ExecutionError.
 
 ЗАРЕГРЕССИОННЫЕ СЦЕНАРИИ, ПРИХВАТЁННЫЕ ДОПОЛНИТЕЛЬНО
-  Все 158 тестов Stage E/E.1 проходят; Stage A–D — 799 passed без
-  изменений и без правок ожиданий (см. NO_CHANGES_ABCD_PROOF).
-  12 обязательных сценариев §3.5, 12 обязательных §4.5 и 7 обязательных
-  §5.3 первоначального ТЗ E.1 продолжают проходить (46 тестов раунда 1
-  входят в 158; их ожидания не менялись).
+  Все 163 теста Stage E/E.1 проходят (158 прежних + 5 новых); их
+  прежние ожидания не менялись. Stage A–D — 799 passed in 6.56s без изменений
+  и без правок ожиданий (см. NO_CHANGES_ABCD_PROOF: 179 файлов, 0
+  нарушений). 12 обязательных сценариев §3.5, 12 обязательных §4.5 и
+  7 обязательных §5.3 первоначального ТЗ E.1 продолжают проходить.
+  Прежняя валидация чисел раунда 2 (NaN / ±Infinity / нули /
+  отрицательные / переполнение int -> ExecutionError) сохранена без
+  ослабления; прежние 23 теста валидации проходят как есть.
 
-ВЕРДИКТ: 1208 passed in 14.61s / 1728 passed in 26.29s — все требования регрессии финальных
-правок выполнены; поставка остаётся FINAL без дополнительных версий/папок.
+ВЕРДИКТ: 1213 passed in 14.53s / 1733 passed in 26.54s — все требования регрессии раунда 3
+выполнены; поставка остаётся FINAL без дополнительных версий/папок.

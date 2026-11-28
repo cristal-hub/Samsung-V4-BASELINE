@@ -114,6 +114,18 @@ def split_execution_deviation(*, side: str, reference_price: float,
     +Infinity проходил проверку знаком и заражал показатели Inf/NaN —
     теперь fail-closed: ExecutionError до любых вычислений.
 
+    ЗАЩИТА ОТ ПЕРЕПОЛНЕНИЯ (Stage E.1 FINAL NUMERIC OVERFLOW GUARD):
+    конечность КАЖДОГО ПРОМЕЖУТОЧНОГО результата — size
+    (= quantity * contract_multiplier), adverse_slippage_cost,
+    favorable_price_improvement — проверяется через math.isfinite()
+    ДО возврата. Аргументы по отдельности конечны, но их произведение
+    может переполниться до +-Infinity (пример: quantity = 10**300 при
+    contract_multiplier = 1e100). Переполнение или нечисловой
+    промежуточный результат -> ExecutionError; возврат inf/nan
+    невозможен; все возвращаемые значения — конечные неотрицательные
+    числа. Формулы расчёта и порядок корректных float-операций
+    НЕ изменены.
+
     reference_price — «сырая» опорная цена ОПЕРАЦИИ: open свечи исполнения
     (вход/стратегический выход), уровень стопа/цели (защитный выход),
     гэповое open (выход гэпом через стоп). Не путать с уровнем сигнала:
@@ -146,16 +158,66 @@ def split_execution_deviation(*, side: str, reference_price: float,
             f"получено {quantity!r}")
     contract_multiplier = _validated_finite_positive(
         contract_multiplier, "contract_multiplier")
-    size = quantity * contract_multiplier
+    # Stage E.1 FINAL NUMERIC OVERFLOW GUARD: аргументы по отдельности
+    # конечны (проверено выше), но ПРОМЕЖУТОЧНЫЕ результаты обязаны
+    # проверяться на конечность ДО возврата: произведение конечных
+    # аргументов может переполниться до +-Infinity (пример:
+    # quantity = 10**300, contract_multiplier = 1e100 -> size = inf).
+    # Fail-closed: переполнение или нечисловой промежуточный результат
+    # -> ExecutionError; возвращать inf/nan ЗАПРЕЩЕНО. Формулы расчёта,
+    # порядок корректных float-операций и экономическая модель НЕ
+    # изменены (выражения size * adverse_delta и size * (-adverse_delta)
+    # вычисляются в прежнем порядке).
+    try:
+        size = quantity * contract_multiplier
+    except OverflowError as exc:
+        raise ExecutionError(
+            "split_execution_deviation: size = quantity * "
+            "contract_multiplier не представим конечным float "
+            f"(переполнение int->float); quantity={quantity!r}, "
+            f"contract_multiplier={contract_multiplier!r}") from exc
+    if not math.isfinite(size):
+        raise ExecutionError(
+            "split_execution_deviation: size = quantity * "
+            "contract_multiplier переполнен до нечислового результата "
+            f"({size!r} — не конечное число); quantity={quantity!r}, "
+            f"contract_multiplier={contract_multiplier!r}")
     if side == SIDE_BUY:
         adverse_delta = execution_price - reference_price
     else:
         adverse_delta = reference_price - execution_price
     if adverse_delta > 0.0:
-        return size * adverse_delta, 0.0
-    if adverse_delta < 0.0:
-        return 0.0, size * (-adverse_delta)
-    return 0.0, 0.0
+        adverse_slippage_cost = size * adverse_delta
+        favorable_price_improvement = 0.0
+    elif adverse_delta < 0.0:
+        adverse_slippage_cost = 0.0
+        favorable_price_improvement = size * (-adverse_delta)
+    else:
+        return 0.0, 0.0
+    if not math.isfinite(adverse_slippage_cost):
+        raise ExecutionError(
+            "split_execution_deviation: adverse_slippage_cost переполнен "
+            "до нечислового результата при конечных аргументах "
+            f"({adverse_slippage_cost!r} — не конечное число); "
+            f"quantity={quantity!r}, "
+            f"contract_multiplier={contract_multiplier!r}")
+    if not math.isfinite(favorable_price_improvement):
+        raise ExecutionError(
+            "split_execution_deviation: favorable_price_improvement "
+            "переполнен до нечислового результата при конечных "
+            f"аргументах ({favorable_price_improvement!r} — не конечное "
+            f"число); quantity={quantity!r}, "
+            f"contract_multiplier={contract_multiplier!r}")
+    if adverse_slippage_cost < 0.0 or favorable_price_improvement < 0.0:
+        # Защитная проверка неотрицательности возвращаемых величин:
+        # при валидных входах формула не может дать отрицательное
+        # значение; нарушение — внутренняя ошибка модели (fail-closed).
+        raise ExecutionError(
+            "split_execution_deviation: отрицательный результат расчёта "
+            f"(adverse_slippage_cost={adverse_slippage_cost!r}, "
+            "favorable_price_improvement="
+            f"{favorable_price_improvement!r})")
+    return adverse_slippage_cost, favorable_price_improvement
 
 
 class HistoricalExecutionSimulator:
