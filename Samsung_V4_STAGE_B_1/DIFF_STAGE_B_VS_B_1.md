@@ -1,0 +1,1662 @@
+# DIFF_STAGE_B_VS_B_1.md
+# SAMSUNG V4 — NEW STRATEGY ENGINE. DIFF: STAGE B → STAGE B.1
+
+Дата: 2026-11-28.
+Исходный пакет: Stage B (полная версия, база Stage A.2.1
+`103d22d34d483fbb7179d1fef07dd0e24b51dfcd`).
+Этот diff — РЕАЛЬНЫЙ вывод `diff -u` между файлами пакета Stage B и
+пакета Stage B.1 (исправления дефектов №1–№3 изолированного состояния).
+
+## 1. Сводка изменений
+
+| Изменение | Файл | Суть |
+|---|---|---|
+| ИЗМЕНЁН | `candidate/strategy_state.py` | Дефект №1: инъективное длинно-префиксное имя файла (`encode_state_filename`/`decode_state_filename`) вместо `f"{strategy_id}__{figi}.json"`; Дефект №2: обязательная проверка ключей записи ПОСЛЕ чтения (`_load`/`_verify_loaded_key`, persistent + memory); Дефект №3: атомарный read-modify-write в `StateStore.update_state`/`get_or_create` + разделяемый RLock каталога (реестр по realpath); делегирование менеджера |
+| ИЗМЕНЁН | `candidate/tests/test_stage_b_state_isolation.py` | Все 115 тестов Stage B сохранены; проверки файлов построены через `ss.encode_state_filename` (новый заданный алгоритм); заголовок дополнен пометкой B.1; семантика проверок не ослаблялась |
+| ДОБАВЛЕН | `candidate/tests/test_stage_b1_state_key_and_concurrency.py` | 33 новых теста Stage B.1 (ТЗ §6) |
+| ДОБАВЛЕН | `archive/` + `archive/ARCHIVE_README.md` | Отчёты Stage A/A.1/A.2/A.2.1 перемещены в архив с явной пометкой неактуальности для Stage B.1 |
+| ОБНОВЛЕНЫ | корневые отчёты Stage B (9 канонических документов ТЗ §7) | Актуальные документы Stage B.1 |
+
+Больше НИКАКИХ изменений: все остальные файлы `candidate/`
+(включая Stage A.2.1, торговые файлы, engine.json, golden fixtures)
+побайтово совпадают с пакетом Stage B — проверено `diff -rq`.
+
+## 2. Ядро Stage B: StrategyState / StateStore / StrategyStateManager
+
+`candidate/strategy_state.py`: +458 / -60 строк (unified diff, контекст 3):
+
+```diff
+--- a/candidate/strategy_state.py
++++ b/candidate/strategy_state.py
+@@ -1,4 +1,4 @@
+-# strategy_state.py — SAMSUNG V4 — NEW STRATEGY ENGINE. STAGE B.
++# strategy_state.py — SAMSUNG V4 — NEW STRATEGY ENGINE. STAGE B (+ B.1).
+ #
+ # ИЗОЛИРОВАННОЕ СОСТОЯНИЕ СТРАТЕГИИ ПО КЛЮЧУ (strategy_id, FIGI).
+ #
+@@ -11,21 +11,53 @@
+ #   * некорректное/несовместимое состояние НЕ приводит к незаметному
+ #     продолжению работы с неверными данными (fail-closed).
+ #
++# ИСПРАВЛЕНИЯ STAGE B.1 (корректирующая задача поверх Stage B):
++#   * ДЕФЕКТ №1 (коллизия имён файлов): имя записи больше НЕ строится
++#     конкатенацией f"{strategy_id}__{figi}.json" — такой шаблон НЕ
++#     инъективен (пары ("alpha__beta","FIGI1") и ("alpha","beta__FIGI1")
++#     давали одно имя). Введено ДЛИННО-ПРЕФИКСНОЕ кодирование
++#     encode_state_filename(): "{len(s1)}--{s1}--{len(s2)}--{s2}.json".
++#     Кодирование инъективно для ВСЕХ допустимых значений (разбор строго
++#     позиционный: длина читается первой, компонент берётся ровно N
++#     символов — разделитель внутри значения путаницы не создаёт).
++#     Скрытой миграции старого формата НЕТ: старые имена не декодируются
++#     и обнаруживаются как повреждение (fail-closed), данные не читаются
++#     и не переписываются.
++#   * ДЕФЕКТ №2 (проверка ключа после чтения): StateStore._load ПОСЛЕ
++#     десериализации ОБЯЗАТЕЛЬНО сверяет state.strategy_id и state.figi
++#     с запрошенными; несовпадение — StateCorruptionError: состояние не
++#     возвращается, пустым не подменяется, файл не изменяется. Проверка
++#     выполняется и в memory-режиме (единый контракт).
++#   * ДЕФЕКТ №3 (конкурентное обновление): read-modify-write вынесен в
++#     StateStore.update_state/get_or_create — атомарен относительно ВСЕХ
++#     менеджеров, работающих через ОДНИ экземпляр StateStore (один RLock
++#     хранилища на всю операцию: чтение + updater + запись). Локальный
++#     RLock менеджера больше НЕ является механизмом атомарности (он
++#     сохранён только как дисциплина порядка manager->store). Дополнительно
++#     все экземпляры StateStore на одном реальном пути (realpath) одного
++#     процесса разделяют ОДИН RLock (реестр слабых ссылок) — несколько
++#     экземпляров на один путь тоже сериализуются. Граница гарантии:
++#     ОДИН процесс. Межпроцессная блокировка НЕ поддерживается и честно
++#     зафиксирована в KNOWN_LIMITATIONS_STAGE_B.md.
++#
+ # Состав модуля (ТЗ Stage B §3):
+ #   * StrategyState         — типизированная неизменяемая модель состояния,
+ #                             привязанная к (strategy_id, FIGI, config_hash)
+ #                             и к версии схемы состояния;
+ #   * StateStore            — хранилище состояния: изоляция по ключу,
+ #                             детерминированная сериализация, атомарная
+-#                             запись, проверка схемы и ключей, обнаружение
++#                             запись, атомарный read-modify-write, проверка
++#                             схемы, ключей (в т.ч. ПОСЛЕ чтения) и
++#                             содержимого имени файла, обнаружение
+ #                             повреждённых записей, контролируемая ошибка
+ #                             при несовпадении config_hash (без автоматиче-
+ #                             ского переноса старого состояния);
+ #   * StrategyStateManager  — менеджер, выдающий стратегии ТОЛЬКО её
+ #                             собственное состояние; создаёт независимое
+ #                             состояние при отсутствии записи; не использует
+-#                             глобальный mutable context; корректен при
+-#                             параллельных обращениях;
++#                             глобальный mutable context; делегирует атомар-
++#                             ные операции хранилищу (корректен при работе
++#                             нескольких менеджеров с одним хранилищем);
+ #   * resolve_state_store_path — ЯВНОЕ разрешение пути persistent-хранилища
+ #                             из переданной конфигурации; скрытого пути по
+ #                             умолчанию НЕ существует (fail-closed).
+@@ -57,6 +89,7 @@
+ import re
+ import tempfile
+ import threading
++import weakref
+ from dataclasses import dataclass, field, replace as _dataclass_replace
+ from datetime import datetime, timezone
+ from typing import Any, Callable, List, Mapping, Optional, Tuple
+@@ -202,6 +235,172 @@
+         raise StateValidationError(
+             "config_hash состояния не соответствует формату SHA-256 "
+             f"hexdigest: {exc}") from exc
++
++
++# ---------------------------------------------------------------------------
++# Имя файла записи: ДЛИННО-ПРЕФИКСНОЕ (инъективное) кодирование пары ключей
++# (исправление ДЕФЕКТА №1 Stage B.1)
++# ---------------------------------------------------------------------------
++#
++# Старый шаблон f"{strategy_id}__{figi}.json" НЕ инъективен: '__' может
++# встречаться внутри допустимых значений (validate_* разрешают '_'), поэтому
++# пары ("alpha__beta", "FIGI1") и ("alpha", "beta__FIGI1") давали ОДНО имя
++# файла — состояния двух разных ключей перезаписывали друг друга.
++#
++# Новый алгоритм (length-prefixed encoding, однозначно обратимый):
++#
++#     encode(s1, s2) = f"{len(s1)}--{s1}--{len(s2)}--{s2}.json"
++#
++# Разбор СТРОГО ПОЗИЦИОННЫЙ (decode_state_filename):
++#   1. десятичные цифры от начала тела до первых '--' -> длина N1;
++#   2. ровно N1 символов -> strategy_id;
++#   3. ровно два символа '--';
++#   4. десятичные цифры до следующих '--' -> длина N2;
++#   5. ровно N2 символов -> figi; позиция обязана совпасть с концом тела.
++#
++# Инъективность доказуема конструктивно: decode(encode(s1, s2)) == (s1, s2)
++# для любых строк, включая строки, содержащие '--', цифры и любую длину
++# префиксов, потому что компонент ВСЕГДА берётся ровно N символов с позиции,
++# следующей за его префиксом длины, — разделитель внутри значения на разбор
++# не влияет. Отсюда: разные пары -> разные имена файлов (без коллизий).
++#
++# Безопасность имён файлов сохранена: оба компонента предварительно
++# проверяются validate_strategy_id/validate_figi (ASCII
++# [A-Za-z0-9._-], первый символ — буква/цифра, запрещены '/', '\\',
++# нулевой байт, '..' и управляющие символы), поэтому закодированное имя
++# состоит только из безопасных символов, начинается с цифры и не может
++# служить инструментом path traversal. Максимальная длина имени:
++# 3+2+128+2+2+64+5 = 206 символов (< 255 на распространённых ФС).
++#
++# Скрытой миграции старого формата НЕТ (Stage B не принят, пользовательские
++# данные не мигрируются): имена, не декодируемые новым алгоритмом, дают
++# StateCorruptionError при list_states(); _load ищет ТОЛЬКО новое имя —
++# старый файл не читается и не переписывается.
++
++_STATE_FILENAME_SUFFIX = ".json"
++_LENGTH_SEPARATOR = "--"
++_LENGTH_RUN_RE = re.compile(r"^[0-9]+" + _LENGTH_SEPARATOR)
++
++
++def encode_state_filename(strategy_id: str, figi: str) -> str:
++    """Инъективное имя файла записи для пары (strategy_id, figi).
++
++    Длинно-префиксное кодирование (см. блок документации выше).
++    Компоненты предварительно проходят validate_strategy_id/validate_figi
++    (fail-closed: недопустимое значение не попадает в имя файла).
++    """
++    validate_strategy_id(strategy_id)
++    validate_figi(figi)
++    return (f"{len(strategy_id)}{_LENGTH_SEPARATOR}"
++            f"{strategy_id}{_LENGTH_SEPARATOR}"
++            f"{len(figi)}{_LENGTH_SEPARATOR}"
++            f"{figi}{_STATE_FILENAME_SUFFIX}")
++
++
++def decode_state_filename(name: Any) -> Tuple[str, str]:
++    """Обратное разбор имени файла записи: возвращает (strategy_id, figi).
++
++    Строго позиционный разбор (см. блок документации выше); любое
++    отклонение структуры — StateCorruptionError (имя не соответствует
++    формату Stage B.1; файл не маскируется и не исправляется).
++    Значения НЕ повторно проверяются на набор символов здесь: результат
++    сравнивается с ключами содержимого записи (те проверены
++    StrategyState), несовпадение обнаруживается вызывающим кодом.
++    """
++    if not isinstance(name, str) or not name.endswith(_STATE_FILENAME_SUFFIX):
++        raise StateCorruptionError(
++            f"имя файла записи состояния {name!r} не соответствует "
++            "формату Stage B.1 (ожидается суффикс '.json'); содержимое "
++            "не используется (fail-closed)")
++    body = name[:-len(_STATE_FILENAME_SUFFIX)]
++
++    pos = 0
++    match = _LENGTH_RUN_RE.match(body)
++    if match is None:
++        raise StateCorruptionError(
++            f"имя файла записи состояния {name!r} повреждено: не читается "
++            "префикс длины strategy_id (формат Stage B.1: "
++            "'{len(s1)}--{s1}--{len(s2)}--{s2}.json'); fail-closed")
++    n1 = int(match.group(0)[:-len(_LENGTH_SEPARATOR)])
++    pos = match.end()
++    if pos + n1 > len(body):
++        raise StateCorruptionError(
++            f"имя файла записи состояния {name!r} повреждено: префикс "
++            f"длины {n1} выходит за пределы имени; fail-closed")
++    strategy_id = body[pos:pos + n1]
++    pos += n1
++    if body[pos:pos + len(_LENGTH_SEPARATOR)] != _LENGTH_SEPARATOR:
++        raise StateCorruptionError(
++            f"имя файла записи состояния {name!r} повреждено: не найден "
++            f"разделитель после strategy_id на позиции {pos}; fail-closed")
++    pos += len(_LENGTH_SEPARATOR)
++
++    rest = body[pos:]
++    match = _LENGTH_RUN_RE.match(rest)
++    if match is None:
++        raise StateCorruptionError(
++            f"имя файла записи состояния {name!r} повреждено: не читается "
++            "префикс длины figi; fail-closed")
++    n2 = int(match.group(0)[:-len(_LENGTH_SEPARATOR)])
++    pos += match.end()
++    if pos + n2 != len(body):
++        raise StateCorruptionError(
++            f"имя файла записи состояния {name!r} повреждено: длина figi "
++            f"({n2}) не согласуется с остатком имени; fail-closed")
++    figi = body[pos:pos + n2]
++    return (strategy_id, figi)
++
++
++# ---------------------------------------------------------------------------
++# Реестр разделяемых замков по реальному пути хранилища (усиление ДЕФЕКТА
++# №3 Stage B.1: несколько экземпляров StateStore на одном пути одного
++# процесса сериализуются ОДНИМ RLock)
++# ---------------------------------------------------------------------------
++#
++# Граница гарантии атомарности read-modify-write:
++#   * менеджеры через ОДНИ экземпляр StateStore — атомарно (RLock
++#     экземпляра, см. StateStore.update_state);
++#   * НЕСКОЛЬКО экземпляров StateStore на одном реальном каталоге ОДНОГО
++#     процесса — тоже сериализуются: realpath каталога -> один разделяемый
++#     RLock из реестра ниже; держится слабыми ссылками и исчезает вместе
++#     с последним живым экземпляром хранилища;
++#   * НЕСКОЛЬКО ПРОЦЕССОВ на одном каталоге — НЕ поддерживается: файловая
++#     запись атомарна (tmp + os.replace), но read-modify-write между
++#     процессами не сериализуется. Межпроцессная блокировка сознательно
++#     не добавлена (ТЗ Stage B.1 §5); ограничение зафиксировано в
++#     KNOWN_LIMITATIONS_STAGE_B.md.
++
++
++class _StoreDirLockHolder:
++    """Держатель разделяемого RLock каталога (для реестра слабых ссылок)."""
++
++    def __init__(self) -> None:
++        self.lock = threading.RLock()
++
++
++_STORE_DIR_LOCKS_REGISTRY_LOCK = threading.Lock()
++_STORE_DIR_LOCKS_REGISTRY: (
++    "weakref.WeakValueDictionary[str, _StoreDirLockHolder]") = \
++    weakref.WeakValueDictionary()
++
++
++def _shared_lock_for_store_dir(path: str) -> Tuple[threading.RLock, Any]:
++    """Возвращает (разделяемый RLock, держатель) для каталога хранилища.
++
++    Все живые экземпляры StateStore одного процесса с одним
++    os.path.realpath(path) получают ОДИН и тот же RLock, поэтому их
++    операции (включая read-modify-write) взаимно сериализуются.
++    Держатель возвращается парой с замком: экземпляр хранилища обязан
++    хранить сильную ссылку на держателя, иначе запись реестра (слабые
++    ссылки) исчезнет и замок перестанет быть разделяемым.
++    """
++    key = os.path.realpath(path)
++    with _STORE_DIR_LOCKS_REGISTRY_LOCK:
++        holder = _STORE_DIR_LOCKS_REGISTRY.get(key)
++        if holder is None:
++            holder = _StoreDirLockHolder()
++            _STORE_DIR_LOCKS_REGISTRY[key] = holder
++        return holder.lock, holder
+ 
+ 
+ # ---------------------------------------------------------------------------
+@@ -582,17 +781,31 @@
+       * несовпадение config_hash — StateConfigMismatchError: старое
+         состояние НЕ переносится на новую конфигурацию автоматически,
+         требуется ЯВНОЕ решение (reset_state);
+-      * корректность при параллельных обращениях: все операции под
+-        RLock хранилища; составные операции менеджера — под его RLock
+-        плюс контроль существования записи.
++      * проверка соответствия ключей ПОСЛЕ чтения (Stage B.1, дефект №2):
++        _load сверяет strategy_id/figi десериализованной записи с
++        запрошенными; подмена содержимого файла чужим ключом даёт
++        StateCorruptionError (файл не изменяется, состояние не
++        возвращается, пустым не подменяется) — и в memory-режиме тоже;
++      * имя файла пары — инъективное длинно-префиксное кодирование
++        (Stage B.1, дефект №1): разные пары дают разные файлы;
++      * корректность при параллельных обращениях (Stage B.1, дефект №3):
++        атомарный read-modify-write — StateStore.update_state и
++        StateStore.get_or_create выполняют чтение, updater и запись под
++        ОДНИМ RLock хранилища, поэтому атомарны относительно ВСЕХ
++        менеджеров, работающих через один экземпляр StateStore;
++        экземпляры StateStore на одном реальном пути одного процесса
++        разделяют ОДИН RLock (реестр по realpath); межпроцессная
++        блокировка НЕ поддерживается (документированное ограничение).
+     """
+ 
+     def __init__(self, *, path: Optional[str] = None) -> None:
+-        self._lock = threading.RLock()
+         if path is None:
+             # Memory-режим: явный и документированный; используется
+             # тестами и процессами без persistent-истории. Скрытого
+-            # файлового пути нет.
++            # файлового пути нет. Данные экземпляра видны только ему:
++            # отдельный RLock экземпляра.
++            self._lock = threading.RLock()
++            self._lock_holder = None
+             self._path: Optional[str] = None
+             self._records: dict = {}
+             return
+@@ -600,6 +813,14 @@
+             raise StateStoreConfigError(
+                 "path persistent-хранилища состояния должен быть непустой "
+                 f"строкой; получено {type(path).__name__}")
++        # Persistent-режим: источник истины — файлы каталога. Замок
++        # разделяется ВСЕМИ экземплярами StateStore этого процесса на
++        # тот же реальный каталог (усиление Stage B.1; см.
++        # _shared_lock_for_store_dir): операции разных экземпляров
++        # взаимно сериализуются, атомарность read-modify-write не зависит
++        # от того, через какой экземпляр она выполнена. Сильная ссылка
++        # на держателя удерживает запись реестра, пока жив экземпляр.
++        self._lock, self._lock_holder = _shared_lock_for_store_dir(path)
+         self._path = path
+         os.makedirs(self._path, exist_ok=True)
+ 
+@@ -619,8 +840,13 @@
+ 
+     @staticmethod
+     def _filename(strategy_id: str, figi: str) -> str:
+-        """Имя файла записи: безопасный набор символов проверен ключами."""
+-        return f"{strategy_id}__{figi}.json"
++        """Имя файла записи: инъективное длинно-префиксное кодирование.
++
++        Stage B.1 (дефект №1): см. encode_state_filename. Компоненты
++        приходят сюда уже проверенными validate_*; кодирование
++        дополнительно проверяет их (fail-closed).
++        """
++        return encode_state_filename(strategy_id, figi)
+ 
+     def _load(self, strategy_id: str, figi: str) -> Optional[StrategyState]:
+         """Чтение одной записи с ПОЛНОЙ проверкой (fail-closed).
+@@ -629,9 +855,23 @@
+         вызывающим кодом); повреждённая запись — StateCorruptionError /
+         StateSchemaError / StateValidationError (НЕ подменяется пустым
+         состоянием).
++
++        Stage B.1 (дефект №2): ПОСЛЕ десериализации ключи записи
++        ОБЯЗАТЕЛЬНО сверяются с запрошенными. Подмена содержимого файла
++        записью чужого ключа (или рассинхронизация memory-записи) даёт
++        StateCorruptionError: состояние не возвращается, пустым не
++        подменяется, файл/запись не исправляются. Проверка выполняется
++        в ОБОИХ режимах (единый контракт); в memory-режиме она не может
++        быть заменена ключом словаря, т.к. проверяется СОДЕРЖИМОЕ записи,
++        а не позиция хранения.
+         """
+         if self._path is None:
+-            return self._records.get((strategy_id, figi))
++            record = self._records.get((strategy_id, figi))
++            if record is None:
++                return None
++            self._verify_loaded_key(record, strategy_id, figi,
++                                    source="memory")
++            return record
+         file_path = os.path.join(self._path,
+                                  self._filename(strategy_id, figi))
+         if not os.path.isfile(file_path):
+@@ -651,11 +891,43 @@
+                 f"(не читается как JSON: {exc}); пустым состоянием не "
+                 "подменяется (fail-closed)") from exc
+         try:
+-            return StrategyState.from_payload(payload)
++            state = StrategyState.from_payload(payload)
+         except StrategyStateError as exc:
+             raise type(exc)(
+                 f"запись состояния {strategy_id!r}/{figi!r} "
+                 f"({file_path}): {exc}") from exc
++        self._verify_loaded_key(state, strategy_id, figi,
++                                source=file_path)
++        return state
++
++    @staticmethod
++    def _verify_loaded_key(state: Any,
++                           strategy_id: str,
++                           figi: str,
++                           *,
++                           source: str) -> None:
++        """Проверка ключей ЗАГРУЖЕННОЙ записи против запрошенных (B.1).
++
++        ДЕФЕКТ №2 Stage B.1: обязательна независимо от алгоритма имени
++        файла и режима хранилища. Несовпадение — StateCorruptionError:
++        состояние не возвращается, пустое состояние не создаётся,
++        запись не исправляется и не изменяется.
++        """
++        if type(state) is not StrategyState:
++            raise StateCorruptionError(
++                f"запись состояния ({source}) повреждена: ожидается "
++                f"StrategyState, получено {type(state).__name__}; "
++                "состояние не возвращается и не исправляется "
++                "(fail-closed, Stage B.1)")
++        if state.strategy_id != strategy_id or state.figi != figi:
++            raise StateCorruptionError(
++                f"запись состояния ({source}) повреждена: содержимое "
++                f"принадлежит другой паре — "
++                f"({state.strategy_id!r}, {state.figi!r}) вместо "
++                f"запрошенной ({strategy_id!r}, {figi!r}); состояние не "
++                "возвращается, пустым не подменяется, запись не "
++                "исправляется автоматически (fail-closed, Stage B.1 "
++                "дефект №2)")
+ 
+     def _persist(self, state: StrategyState) -> None:
+         """Детерминированная атомарная запись одной записи состояния."""
+@@ -797,6 +1069,126 @@
+                     "ЯВНОЕ решение (reset_state) — fail-closed")
+             self._persist(state)
+ 
++    def get_or_create(self,
++                      strategy_id: Any,
++                      figi: Any,
++                      *,
++                      config_hash: Any,
++                      data: Optional[Mapping[str, Any]] = None,
++                      created_now: Optional[str] = None) -> StrategyState:
++        """Атомарное «получить или создать» для пары (Stage B.1, дефект №3).
++
++        Чтение и (при отсутствии записи) создание выполняются ПОД ОДНИМ
++        RLock хранилища: относительно всех менеджеров и экземпляров
++        StateStore этого процесса на том же пути операция атомарна —
++        окно «проверили, потом создали» отсутствует, две параллельные
++        операции возвращают одно и то же состояние, запись создаётся
++        ровно одна.
++
++        Несовпадение config_hash существующей записи —
++        StateConfigMismatchError (без автоматического переноса на новую
++        конфигурацию).
++        """
++        validate_strategy_id(strategy_id)
++        validate_figi(figi)
++        _validate_config_hash_of_state(config_hash)
++        if created_now is not None:
++            _validate_timestamp(created_now, "created_now")
++        with self._lock:
++            current = self._load(strategy_id, figi)
++            if current is not None:
++                if current.config_hash != config_hash:
++                    raise StateConfigMismatchError(
++                        f"config_hash сохранённого состояния "
++                        f"({current.config_hash!r}) не совпадает с "
++                        f"ожидаемым ({config_hash!r}) для пары "
++                        f"({strategy_id!r}, {figi!r}); старое состояние "
++                        "НЕ переносится на новую конфигурацию "
++                        "автоматически: требуется ЯВНОЕ решение — "
++                        "reset_state или отдельная совместимая обработка "
++                        "(fail-closed, Stage B)")
++                return current
++            state = StrategyState.create(
++                strategy_id, figi, config_hash, data, now=created_now)
++            self._persist(state)
++            return state
++
++    def update_state(self,
++                     strategy_id: Any,
++                     figi: Any,
++                     *,
++                     config_hash: Any,
++                     data: Any = None,
++                     updater: Optional[Callable[[StrategyState],
++                                                Mapping[str, Any]]] = None,
++                     now: Optional[str] = None,
++                     created_now: Optional[str] = None) -> StrategyState:
++        """АТОМАРНЫЙ read-modify-write одной пары (Stage B.1, дефект №3).
++
++        Чтение, вызов updater и запись выполняются ПОД ОДНИМ RLock
++        хранилища, поэтому операция атомарна относительно ВСЕХ
++        менеджеров, работающих через этот экземпляр StateStore (и
++        относительно всех экземпляров StateStore того же процесса на
++        том же реальном пути — общий RLock по realpath). Ни одно
++        обновление не может быть потеряно из-за параллельного
++        read-modify-write: они строго сериализованы.
++
++        Отсутствующая запись создаётся в той же атомарной операции
++        (created_at/updated_at создания — created_now или текущее время
++        UTC); существующая — обязана совпадать по config_hash
++        (несовпадение — StateConfigMismatchError ДО вызова updater).
++
++        Ровно один из аргументов data / updater:
++          * data — новые данные целиком;
++          * updater — функция (текущее состояние) -> новые данные;
++            исключение из updater прерывает операцию БЕЗ записи
++            (сохранённое состояние не меняется).
++
++        Границы гарантии и требования к updater (fail-closed):
++          * updater вызывается ПОД замком хранилища и обязан быть
++            чистой быстрой функцией: НЕ блокировать, НЕ ждать другие
++            потоки, НЕ выполнять операций, требующих этот же замок из
++            другого потока (иначе взаимное ожидание возможно);
++          * повторный вход в ТО ЖЕ хранилище из updater разрешён
++            (RLock реентерабелен для того же потока);
++          * один процесс; несколько процессов — НЕ поддерживается
++            (документированное ограничение, ТЗ Stage B.1 §5).
++        """
++        validate_strategy_id(strategy_id)
++        validate_figi(figi)
++        _validate_config_hash_of_state(config_hash)
++        if (data is None) == (updater is None):
++            raise StateValidationError(
++                "update_state требует РОВНО ОДИН источник новых данных: "
++                "data или updater")
++        if now is not None:
++            _validate_timestamp(now, "now")
++        if created_now is not None:
++            _validate_timestamp(created_now, "created_now")
++        with self._lock:
++            current = self._load(strategy_id, figi)
++            if current is None:
++                current = StrategyState.create(
++                    strategy_id, figi, config_hash, None, now=created_now)
++                self._persist(current)
++            elif current.config_hash != config_hash:
++                raise StateConfigMismatchError(
++                    f"config_hash сохранённого состояния "
++                    f"({current.config_hash!r}) не совпадает с ожидаемым "
++                    f"({config_hash!r}) для пары ({strategy_id!r}, "
++                    f"{figi!r}); старое состояние НЕ переносится на новую "
++                    "конфигурацию автоматически: требуется ЯВНОЕ решение — "
++                    "reset_state или отдельная совместимая обработка "
++                    "(fail-closed, Stage B)")
++            new_data = updater(current) if updater is not None else data
++            if not isinstance(new_data, Mapping):
++                raise StateValidationError(
++                    "новые данные состояния должны быть отображением; "
++                    f"получено {type(new_data).__name__}")
++            new_state = current.with_data(new_data, now=now)
++            self._persist(new_state)
++            return new_state
++
+     def reset_state(self, strategy_id: Any, figi: Any) -> bool:
+         """ЯВНЫЙ сброс состояния ОДНОЙ пары (strategy_id, figi).
+ 
+@@ -819,14 +1211,27 @@
+     def list_states(self) -> List[StrategyState]:
+         """Все записи хранилища, отсортированные по (strategy_id, figi).
+ 
+-        Каждая запись полностью проверяется при чтении; повреждённая
+-        запись даёт StateCorruptionError/StateSchemaError (не пропускается
+-        молча). Порядок детерминированный.
++        Каждая запись полностью проверяется при чтении, включая
++        Stage B.1: (1) имя файла обязано декодироваться длинно-
++        префиксным алгоритмом Stage B.1 (старые/чужие имена —
++        StateCorruptionError, скрытой миграции нет); (2) ключи
++        содержимого обязаны совпадать с декодированным именем;
++        (3) в memory-режиме ключи содержимого сверяются с ключом
++        хранения (единый контракт с persistent-режимом). Повреждённая
++        запись даёт StateCorruptionError/StateSchemaError (не
++        пропускается молча). Порядок детерминированный.
+         """
+         with self._lock:
+             if self._path is None:
+                 keys = sorted(self._records.keys())
+-                return [self._records[key] for key in keys]
++                states = []
++                for key in keys:
++                    record = self._records[key]
++                    self._verify_loaded_key(
++                        record, key[0], key[1],
++                        source=f"memory:{key!r}")
++                    states.append(record)
++                return states
+             states: List[StrategyState] = []
+             for name in sorted(os.listdir(self._path)):
+                 if not name.endswith(".json") or name.startswith(".tmp-"):
+@@ -834,6 +1239,7 @@
+                 file_path = os.path.join(self._path, name)
+                 if not os.path.isfile(file_path):
+                     continue
++                decoded = decode_state_filename(name)
+                 try:
+                     with open(file_path, "r", encoding="utf-8") as handle:
+                         payload = json.loads(handle.read())
+@@ -844,9 +1250,10 @@
+                         "состоянием не подменяется (fail-closed)") from exc
+                 state = StrategyState.from_payload(payload)
+                 # Защита от рассинхронизации имени файла и содержимого:
+-                # источник истины — содержимое; имя должно совпадать.
+-                expected_name = self._filename(state.strategy_id, state.figi)
+-                if expected_name != name:
++                # источник истины — содержимое; декодированное имя
++                # обязано совпадать с ключами содержимого (Stage B.1:
++                # инъективное кодирование делает проверку точной).
++                if (state.strategy_id, state.figi) != decoded:
+                     raise StateCorruptionError(
+                         f"запись состояния повреждена: имя файла {name!r} "
+                         f"не соответствует содержимому "
+@@ -903,8 +1310,12 @@
+       * независимое состояние создаётся при отсутствии записи;
+       * изменения сохраняются; перекрёстное загрязнение исключено
+         (каждая операция работает с одной записью под замком);
+-      * параллельные обращения корректны (замки менеджера и хранилища,
+-        контроль существования записи при создании);
++      * параллельные обращения корректны (Stage B.1, дефект №3):
++        атомарный read-modify-write выполняется в StateStore под ОДНИМ
++        замком ХРАНИЛИЩА, поэтому несколько менеджеров, разделяющих
++        один StateStore, сериализуются корректно и без потери
++        обновлений; локальный RLock менеджера — только дисциплина
++        порядка manager->store, на нём атомарность НЕ строится;
+       * глобальный mutable context НЕ используется (все зависимости
+         внедрены явно);
+       * одно состояние на все инструменты НЕ хранится.
+@@ -987,31 +1398,16 @@
+                        expected_hash: str) -> StrategyState:
+         """Получение состояния; отсутствие записи -> независимое создание.
+ 
+-        Составная операция под замком менеджера; StateAlreadyExistsError
+-        (гонка между get и create) обрабатывается повторным чтением.
+-        """
+-        with self._lock:
+-            state = self._store.get_state(strategy_id, figi,
+-                                          config_hash=expected_hash)
+-            if state is not None:
+-                return state
+-            try:
+-                return self._store.create_state(
+-                    strategy_id, figi, expected_hash,
+-                    now=self._clock())
+-            except StateAlreadyExistsError:
+-                # Гонка: запись создана параллельным потоком между
+-                # get_state и create_state. Повторное чтение под замком
+-                # хранилища; несовпадающий config_hash той записи дал бы
+-                # StateConfigMismatchError здесь же.
+-                state = self._store.get_state(strategy_id, figi,
+-                                              config_hash=expected_hash)
+-                if state is None:
+-                    raise StateCorruptionError(
+-                        f"состояние ({strategy_id!r}, {figi!r}): после "
+-                        "StateAlreadyExistsError запись не найдена; "
+-                        "хранилище неконсистентно (fail-closed)")
+-                return state
++        Stage B.1 (дефект №3): операция ДЕЛЕГИРУЕТ атомарному
++        StateStore.get_or_create — чтение и создание выполняются под
++        ОДНИМ замком хранилища. Гонка get/create между разными
++        менеджерами/экземплярами хранилища исключена архитектурно (окно
++        «проверили, потом создали» отсутствует), поэтому прежний
++        обработчик StateAlreadyExistsError больше не нужен.
++        """
++        return self._store.get_or_create(
++            strategy_id, figi, config_hash=expected_hash,
++            created_now=self._clock())
+ 
+     # --- публичный интерфейс (ТЗ Stage B §3.3) --------------------------------
+ 
+@@ -1044,13 +1440,21 @@
+                      updater: Optional[Callable[[StrategyState],
+                                                 Mapping[str, Any]]] = None,
+                      now: Optional[str] = None) -> StrategyState:
+-        """Обновление данных состояния пары (get-or-create + save).
++        """Обновление данных состояния пары (атомарный RMW, Stage B.1).
+ 
+         Ровно один из аргументов data / updater:
+           * data — новые данные целиком;
+           * updater — функция (текущее состояние) -> новые данные;
+             исключение из updater прерывает операцию БЕЗ записи
+             (сохранённое состояние не меняется).
++
++        Stage B.1 (дефект №3): вся операция read-modify-write выполняется
++        в StateStore.update_state ПОД ОДНИМ замком ХРАНИЛИЩА, поэтому она
++        атомарна относительно ВСЕХ менеджеров, разделяющих этот StateStore
++        (локальный RLock менеджера больше не является механизмом
++        атомарности — он сохранён лишь как дисциплина порядка
++        manager->store для единообразия блокировок).
++
+         Возвращает НОВОЕ неизменяемое состояние (записанное в хранилище).
+         """
+         validate_strategy_id(strategy_id)
+@@ -1063,18 +1467,12 @@
+             strategy_id, figi, config, config_hash)
+         stamp = _validate_timestamp(now, "now") if now is not None else None
+         with self._lock:
+-            current = self._get_or_create(strategy_id, figi, expected_hash)
+-            if updater is not None:
+-                new_data = updater(current)
+-            else:
+-                new_data = data
+-            if not isinstance(new_data, Mapping):
+-                raise StateValidationError(
+-                    "новые данные состояния должны быть отображением; "
+-                    f"получено {type(new_data).__name__}")
+-            new_state = current.with_data(new_data, now=stamp)
+-            self._store.save_state(strategy_id, figi, new_state)
+-            return new_state
++            return self._store.update_state(
++                strategy_id, figi,
++                config_hash=expected_hash,
++                data=data, updater=updater,
++                now=stamp,
++                created_now=self._clock())
+ 
+     def reset_state(self, strategy_id: Any, figi: Any) -> bool:
+         """ЯВНЫЙ сброс состояния одной пары (другие пары не затрагиваются)."""
+
+```
+
+## 2. Тесты Stage B: построение имён файлов переведено на новый инъективный алгоритм (semantics проверок сохранены)
+
+`candidate/tests/test_stage_b_state_isolation.py`: +44 / -25 строк (unified diff, контекст 3):
+
+```diff
+--- a/candidate/tests/test_stage_b_state_isolation.py
++++ b/candidate/tests/test_stage_b_state_isolation.py
+@@ -1,4 +1,4 @@
+-# tests/test_stage_b_state_isolation.py — SAMSUNG V4 — STAGE B.
++# tests/test_stage_b_state_isolation.py — SAMSUNG V4 — STAGE B (+ B.1).
+ #
+ # Изолированное состояние стратегии по ключу (strategy_id, FIGI).
+ # Обязательные сценарии ТЗ Stage B §4 (1–16) + граничные случаи и
+@@ -7,6 +7,13 @@
+ #
+ # Соответствие сценариев ТЗ §4 — заголовки блоков тестов помечены
+ # «ТЗ §4.N».
++#
++# Stage B.1: имя файла записи строится только инъективным длинно-
++# префиксным кодированием (ss.encode_state_filename, помощник fname
++# ниже); семантика всех проверок сохранена. Дополнительные тесты
++# Stage B.1 (коллизии имён, проверка ключа после чтения, атомарный
++# read-modify-write нескольких менеджеров) — в отдельном файле
++# tests/test_stage_b1_state_key_and_concurrency.py.
+ 
+ import json
+ import os
+@@ -66,6 +73,17 @@
+     import hashlib
+     with open(path, "rb") as handle:
+         return hashlib.sha256(handle.read()).hexdigest()
++
++
++def fname(sid, figi):
++    """Имя файла записи ПО АЛГОРИТМУ Stage B.1 (инъективное,
++    длинно-префиксное кодирование; ТЗ Stage B.1 §3, дефект №1).
++
++    Все проверки файлов в этом файле строят имя ТОЛЬКО этим
++    алгоритмом — прежний неинъективный шаблон f"{sid}__{figi}.json"
++    заменён заданием Stage B.1.
++    """
++    return ss.encode_state_filename(sid, figi)
+ 
+ 
+ # ---------------------------------------------------------------------------
+@@ -100,7 +118,7 @@
+         mgr.get_state("s_a", "FIGI_X", config_hash=HASH_A)
+         mgr.get_state("s_b", "FIGI_X", config_hash=HASH_B)
+         files = sorted(os.listdir(store_path))
+-        assert files == ["s_a__FIGI_X.json", "s_b__FIGI_X.json"]
++        assert files == [fname("s_a", "FIGI_X"), fname("s_b", "FIGI_X")]
+ 
+ 
+ # ---------------------------------------------------------------------------
+@@ -156,7 +174,7 @@
+ 
+         def payload_of(sid, figi):
+             with open(os.path.join(
+-                    store_path, f"{sid}__{figi}.json"),
++                    store_path, fname(sid, figi)),
+                     "r", encoding="utf-8") as handle:
+                 return handle.read()
+ 
+@@ -196,13 +214,13 @@
+     def test_creation_is_additive(self, manager, store_path):
+         manager.get_state("s_a", "FIGI_X", config_hash=HASH_A)
+         x_bytes_before = open(
+-            os.path.join(store_path, "s_a__FIGI_X.json"), "rb").read()
++            os.path.join(store_path, fname("s_a", "FIGI_X")), "rb").read()
+         manager.get_state("s_b", "FIGI_NEW", config_hash=HASH_B)
+         x_bytes_after = open(
+-            os.path.join(store_path, "s_a__FIGI_X.json"), "rb").read()
++            os.path.join(store_path, fname("s_a", "FIGI_X")), "rb").read()
+         assert x_bytes_before == x_bytes_after
+         assert os.path.isfile(
+-            os.path.join(store_path, "s_b__FIGI_NEW.json"))
++            os.path.join(store_path, fname("s_b", "FIGI_NEW")))
+         assert dict(manager.get_state(
+             "s_a", "FIGI_X", config_hash=HASH_A).data) == {}
+ 
+@@ -294,7 +312,8 @@
+         st = store.create_state("s_a", "FIGI_X", HASH_A,
+                                 data={"z": 1, "a": {"m": [3, 1, 2]}},
+                                 now=STAMP_T1)
+-        with open(os.path.join(store_path, "s_a__FIGI_X.json"), "rb") as h:
++        with open(os.path.join(store_path, fname("s_a", "FIGI_X")),
++                  "rb") as h:
+             file_bytes = h.read()
+         assert file_bytes == st.to_json().encode("utf-8")
+         # Каноничность: ключи отсортированы, без случайных пробелов.
+@@ -311,8 +330,8 @@
+             s.create_state("s_a", "FIGI_X", HASH_A,
+                            data={"streak": 2, "tags": ["x", "y"]},
+                            now=STAMP_T1)
+-        b1 = open(os.path.join(p1, "s_a__FIGI_X.json"), "rb").read()
+-        b2 = open(os.path.join(p2, "s_a__FIGI_X.json"), "rb").read()
++        b1 = open(os.path.join(p1, fname("s_a", "FIGI_X")), "rb").read()
++        b2 = open(os.path.join(p2, fname("s_a", "FIGI_X")), "rb").read()
+         assert b1 == b2
+ 
+     def test_json_round_trip_preserves_state(self):
+@@ -345,7 +364,7 @@
+ class TestCorruptionDetection:
+     def _write_raw(self, store_path, sid, figi, text):
+         with open(os.path.join(
+-                store_path, f"{sid}__{figi}.json"),
++                store_path, fname(sid, figi)),
+                 "w", encoding="utf-8") as handle:
+             handle.write(text)
+ 
+@@ -357,7 +376,7 @@
+         with pytest.raises(ss.StateCorruptionError):
+             store.list_states()
+         # Запись НЕ подменена пустым состоянием: файл остался повреждённым.
+-        with open(os.path.join(store_path, "s_a__FIGI_X.json"),
++        with open(os.path.join(store_path, fname("s_a", "FIGI_X")),
+                   "r", encoding="utf-8") as handle:
+             assert handle.read() == "{broken json,,,"
+ 
+@@ -388,7 +407,7 @@
+ 
+     def test_manager_does_not_mask_corruption(self, manager, store_path):
+         manager.get_state("s_a", "FIGI_X", config_hash=HASH_A)
+-        with open(os.path.join(store_path, "s_a__FIGI_X.json"),
++        with open(os.path.join(store_path, fname("s_a", "FIGI_X")),
+                   "w", encoding="utf-8") as handle:
+             handle.write("[]")
+         with pytest.raises(ss.StateCorruptionError):
+@@ -401,7 +420,7 @@
+         st = store.create_state("s_a", "FIGI_X", HASH_A, now=STAMP_T1)
+         payload = st.to_payload()
+         payload["figi"] = "FIGI_XX"  # содержимое другого ключа
+-        with open(os.path.join(store_path, "s_a__FIGI_OTHER.json"),
++        with open(os.path.join(store_path, fname("s_a", "FIGI_OTHER")),
+                   "w", encoding="utf-8") as handle:
+             json.dump(payload, handle)
+         with pytest.raises(ss.StateCorruptionError):
+@@ -422,7 +441,7 @@
+         return payload
+ 
+     def test_future_version_rejected(self, store, store_path):
+-        with open(os.path.join(store_path, "s_a__FIGI_X.json"),
++        with open(os.path.join(store_path, fname("s_a", "FIGI_X")),
+                   "w", encoding="utf-8") as handle:
+             json.dump(self._payload_with_version(999), handle)
+         with pytest.raises(ss.StateSchemaError):
+@@ -433,7 +452,7 @@
+             ss.StrategyState.from_payload(self._payload_with_version(2))
+ 
+     def test_string_version_is_corruption(self, store, store_path):
+-        with open(os.path.join(store_path, "s_a__FIGI_X.json"),
++        with open(os.path.join(store_path, fname("s_a", "FIGI_X")),
+                   "w", encoding="utf-8") as handle:
+             json.dump(self._payload_with_version("1"), handle)
+         with pytest.raises(ss.StateCorruptionError):
+@@ -442,7 +461,7 @@
+     def test_missing_version_is_corruption(self, store, store_path):
+         payload = self._payload_with_version(1)
+         del payload["schema_version"]
+-        with open(os.path.join(store_path, "s_a__FIGI_X.json"),
++        with open(os.path.join(store_path, fname("s_a", "FIGI_X")),
+                   "w", encoding="utf-8") as handle:
+             json.dump(payload, handle)
+         with pytest.raises(ss.StateCorruptionError):
+@@ -491,11 +510,11 @@
+ 
+     def test_mismatch_file_untouched(self, manager, store_path):
+         manager.get_state("s_a", "FIGI_X", config_hash=HASH_A)
+-        before = open(os.path.join(store_path, "s_a__FIGI_X.json"),
++        before = open(os.path.join(store_path, fname("s_a", "FIGI_X")),
+                       "rb").read()
+         with pytest.raises(ss.StateConfigMismatchError):
+             manager.get_state("s_a", "FIGI_X", config_hash=HASH_B)
+-        after = open(os.path.join(store_path, "s_a__FIGI_X.json"),
++        after = open(os.path.join(store_path, fname("s_a", "FIGI_X")),
+                      "rb").read()
+         assert before == after
+ 
+@@ -559,9 +578,9 @@
+                                  data={"v": figi})
+         assert manager.reset_state("s_a", "FIGI_X") is True
+         files = sorted(os.listdir(store_path))
+-        assert "s_a__FIGI_X.json" not in files
+-        assert "s_a__FIGI_Y.json" in files
+-        assert "s_b__FIGI_X.json" in files
++        assert fname("s_a", "FIGI_X") not in files
++        assert fname("s_a", "FIGI_Y") in files
++        assert fname("s_b", "FIGI_X") in files
+         assert manager.get_state("s_a", "FIGI_Y",
+                                  config_hash=HASH_A).data["v"] == "FIGI_Y"
+         assert manager.get_state("s_b", "FIGI_X",
+@@ -783,7 +802,7 @@
+         # В рабочей директории НЕ появилось ничего (ни state.json Samsung,
+         # ни «своего» файла по умолчанию); запись только по явному пути.
+         assert os.listdir(cwd_dir) == []
+-        assert sorted(os.listdir(store_dir)) == ["s_a__FIGI_X.json"]
++        assert sorted(os.listdir(store_dir)) == [fname("s_a", "FIGI_X")]
+ 
+     def test_stage_a_files_untouched_by_stage_b_operations(
+             self, store_path):
+@@ -945,7 +964,7 @@
+             "explicit_store", "orders_registry.json", "research_events.jsonl",
+             "state.json", "state.json.tmp"]
+         assert sorted(os.listdir(
+-            str(tmp_path / "explicit_store"))) == ["s_a__FIGI_X.json"]
++            str(tmp_path / "explicit_store"))) == [fname("s_a", "FIGI_X")]
+ 
+     def test_manager_requires_exact_state_store_type(self):
+         with pytest.raises(ss.StateStoreConfigError):
+@@ -1088,7 +1107,7 @@
+             manager.update_state("s_a", "FIGI_X", config_hash=HASH_A,
+                                  data={"n": i})
+         files = os.listdir(store_path)
+-        assert files == ["s_a__FIGI_X.json"]
++        assert files == [fname("s_a", "FIGI_X")]
+ 
+     def test_store_creates_missing_directory(self, tmp_path):
+         nested = str(tmp_path / "deep" / "nested" / "store")
+@@ -1129,7 +1148,7 @@
+             self, store, store_path):
+         st = store.create_state("s_a", "FIGI_X", HASH_A,
+                                 data={"b": 1, "a": 2}, now=STAMP_T1)
+-        with open(os.path.join(store_path, "s_a__FIGI_X.json"),
++        with open(os.path.join(store_path, fname("s_a", "FIGI_X")),
+                   "r", encoding="utf-8") as handle:
+             raw = handle.read()
+         assert raw == st.to_json()
+
+```
+
+## 3. Новый файл
+
+### `candidate/tests/test_stage_b1_state_key_and_concurrency.py` — Новые тесты Stage B.1 (33 теста): инъективность имён, проверка ключа после чтения, атомарный read-modify-write, границы и гонки
+
+```python
+# tests/test_stage_b1_state_key_and_concurrency.py — SAMSUNG V4 — STAGE B.1.
+#
+# Корректирующие тесты Stage B.1 (ТЗ Stage B.1 §6) поверх Stage B:
+#   * ДЕФЕКТ №1 — инъективное кодирование имени файла пары
+#     (strategy_id, FIGI): пары, дававшие ранее ОДНО имя
+#     (f"{strategy_id}__{figi}.json"), теперь независимы;
+#   * ДЕФЕКТ №2 — обязательная проверка ключей записи ПОСЛЕ чтения
+#     (persistent и memory): подмена содержимого чужим ключом
+#     обнаруживается, файл не изменяется, состояние не возвращается;
+#   * ДЕФЕКТ №3 — атомарный read-modify-write в StateStore: два
+#     менеджера с одним хранилищем, параллельные updater-операции без
+#     потери обновлений, детерминированный итог повторов, ошибка
+#     updater не меняет сохранённое состояние.
+#
+# Плюс: независимость разных пар при параллельной работе, границы
+# допустимых строк без коллизий, отсутствие скрытой миграции старого
+# формата имён. Все тесты offline; без сети, брокера и заявок; старые
+# файлы Samsung не затрагиваются; торговая логика не используется.
+
+import json
+import os
+import threading
+from concurrent.futures import ThreadPoolExecutor
+
+import pytest
+
+import strategy_state as ss
+
+HASH_A = "a" * 64
+HASH_B = "b" * 64
+STAMP_T1 = "2026-01-01T10:00:00.000000Z"
+STAMP_T2 = "2026-01-02T11:00:00.000000Z"
+
+# Пары, которые СТАРЫМ шаблоном f"{s1}__{s2}.json" давали ОДНО имя файла:
+# "alpha__beta" + "FIGI1" -> "alpha__beta__FIGI1.json"
+# "alpha"       + "beta__FIGI1" -> "alpha__beta__FIGI1.json"
+COLLIDING_PAIR_1 = ("alpha__beta", "FIGI1")
+COLLIDING_PAIR_2 = ("alpha", "beta__FIGI1")
+
+
+@pytest.fixture
+def store_path(tmp_path):
+    """Явный путь persistent-хранилища (вне дерева проекта)."""
+    return str(tmp_path / "state_store")
+
+
+@pytest.fixture
+def store(store_path):
+    return ss.StateStore(path=store_path)
+
+
+@pytest.fixture
+def manager(store):
+    return ss.StrategyStateManager(store)
+
+
+def read_bytes(store_path, sid, figi):
+    with open(os.path.join(store_path, ss.encode_state_filename(sid, figi)),
+              "rb") as handle:
+        return handle.read()
+
+
+def listdir_names(store_path):
+    return sorted(os.listdir(store_path))
+
+
+# ---------------------------------------------------------------------------
+# ДЕФЕКТ №1 — инъективность имени файла
+# ---------------------------------------------------------------------------
+
+
+class TestFilenameInjectivity:
+    def test_encode_differs_for_previously_colliding_pairs(self):
+        n1 = ss.encode_state_filename(*COLLIDING_PAIR_1)
+        n2 = ss.encode_state_filename(*COLLIDING_PAIR_2)
+        # Старый шаблон давал ОДНО имя; новое кодирование — два разных.
+        assert n1 != n2
+        assert ss.decode_state_filename(n1) == COLLIDING_PAIR_1
+        assert ss.decode_state_filename(n2) == COLLIDING_PAIR_2
+
+    def test_encode_decode_round_trip_allows_separators_inside_values(self):
+        # Разделитель '--', цифры и длина-подобные строки внутри значений
+        # не ломают позиционный разбор (значения — гранично-допустимые:
+        # первый символ буква/цифра, набор [A-Za-z0-9._-]).
+        tricky = [
+            ("5--x", "0"),
+            ("0", "12--34"),
+            ("a--", "b--"),
+            ("ab--", "b--a"),
+            ("123", "456"),
+            ("s1", "s2--3--4--5"),
+            ("7x", "7--7--"),
+            ("1--1", "1--1"),
+        ]
+        for s1, s2 in tricky:
+            name = ss.encode_state_filename(s1, s2)
+            assert ss.decode_state_filename(name) == (s1, s2)
+
+    def test_previous_colliding_pairs_are_independent_files(
+            self, manager, store_path):
+        """ТЗ Stage B.1 §6.1: две пары, ранее дававшие одно имя файла,
+        теперь создаются независимо."""
+        st1 = manager.get_state(*COLLIDING_PAIR_1, config_hash=HASH_A)
+        st2 = manager.get_state(*COLLIDING_PAIR_2, config_hash=HASH_B)
+        # Две разные записи, два разных файла, старого имени не существует.
+        assert st1.key() == COLLIDING_PAIR_1
+        assert st2.key() == COLLIDING_PAIR_2
+        names = listdir_names(store_path)
+        assert len(names) == 2
+        assert names == sorted([
+            ss.encode_state_filename(*COLLIDING_PAIR_1),
+            ss.encode_state_filename(*COLLIDING_PAIR_2)])
+        # Имя старого формата отсутствует: скрытой миграции/совмещения нет.
+        assert "alpha__beta__FIGI1.json" not in names
+
+    def test_write_first_pair_does_not_change_second(
+            self, manager, store_path):
+        """ТЗ Stage B.1 §6.2: запись первой пары не меняет запись второй."""
+        manager.get_state(*COLLIDING_PAIR_1, config_hash=HASH_A)
+        manager.get_state(*COLLIDING_PAIR_2, config_hash=HASH_B)
+        second_before = read_bytes(store_path, *COLLIDING_PAIR_2)
+        for step in range(3):
+            manager.update_state(*COLLIDING_PAIR_1, config_hash=HASH_A,
+                                 data={"step": step})
+        assert read_bytes(store_path, *COLLIDING_PAIR_2) == second_before
+
+    def test_read_second_pair_returns_second_state(
+            self, manager, store_path):
+        """ТЗ Stage B.1 §6.3: чтение второй пары не возвращает состояние
+        первой."""
+        manager.update_state(*COLLIDING_PAIR_1, config_hash=HASH_A,
+                             data={"owner": "first", "n": 10})
+        manager.update_state(*COLLIDING_PAIR_2, config_hash=HASH_B,
+                             data={"owner": "second", "n": 20})
+        st1 = manager.get_state(*COLLIDING_PAIR_1, config_hash=HASH_A)
+        st2 = manager.get_state(*COLLIDING_PAIR_2, config_hash=HASH_B)
+        assert dict(st1.data) == {"owner": "first", "n": 10}
+        assert dict(st2.data) == {"owner": "second", "n": 20}
+        assert st2.config_hash == HASH_B
+        assert st2.key() == COLLIDING_PAIR_2
+
+    def test_list_states_returns_both_pairs(self, manager):
+        """ТЗ Stage B.1 §6.4: list_states() возвращает обе пары."""
+        manager.update_state(*COLLIDING_PAIR_1, config_hash=HASH_A,
+                             data={"n": 1})
+        manager.update_state(*COLLIDING_PAIR_2, config_hash=HASH_B,
+                             data={"n": 2})
+        keys = [st.key() for st in manager.list_states()]
+        assert keys == sorted([COLLIDING_PAIR_1, COLLIDING_PAIR_2])
+        assert len(keys) == 2
+
+    def test_boundary_valid_strings_no_collisions(self, store):
+        """ТЗ Stage B.1 §6.8: коллизий нет на граничных допустимых строках.
+
+        Границы: максимальная длина (128/64), одиночный символ, только
+        цифры, точки/дефисы/подчёркивания, строки, похожие на префикс
+        длины ('5--x'), и «вложенные» коллизионные комбинации.
+        """
+        sid_max = "s" + "a" * 127           # 128 символов
+        figi_max = "F" + "9" * 63           # 64 символа
+        pairs = [
+            ("s", "f"),
+            ("s", "f.json"[:7]),            # точка внутри допустимого
+            ("0", "0"),
+            ("9" * 128, "8" * 64),
+            (sid_max, figi_max),
+            ("5--x", "12--34"),
+            ("alpha__beta", "FIGI1"),
+            ("alpha", "beta__FIGI1"),
+            ("a--b", "c--d"),
+            ("x", "y__z__w"),
+            ("y__z", "w"),
+            ("n1", "n2"),
+            ("n1__n2", "n3"),
+            ("n1", "n2__n3"),
+        ]
+        names = [ss.encode_state_filename(s, f) for s, f in pairs]
+        # Инъективность на наборе: все имена различны.
+        assert len(set(names)) == len(names)
+        # Обратимость на наборе.
+        for (s, f), name in zip(pairs, names):
+            assert ss.decode_state_filename(name) == (s, f)
+        # Файловый уровень: все пары живут в одном хранилище независимо.
+        for i, (s, f) in enumerate(pairs):
+            store.update_state(s, f, config_hash=HASH_A,
+                               data={"index": i})
+        states = store.list_states()
+        assert [st.key() for st in states] == sorted(pairs)
+        for i, (s, f) in enumerate(pairs):
+            st = store.get_state(s, f)
+            assert dict(st.data) == {"index": i}
+
+    def test_filename_length_limit_is_filesystem_safe(self, store_path):
+        sid_max = "s" + "a" * 127
+        figi_max = "F" + "9" * 63
+        name = ss.encode_state_filename(sid_max, figi_max)
+        assert len(name) <= 255  # предел имени файла на распространённых ФС
+        store = ss.StateStore(path=store_path)
+        store.create_state(sid_max, figi_max, HASH_A)
+        assert listdir_names(store_path) == [name]
+        assert store.get_state(sid_max, figi_max) is not None
+
+    def test_old_format_filename_is_not_silently_used_or_migrated(
+            self, store, store_path):
+        """Скрытой миграции старого формата НЕТ: старое имя не читается
+        как запись нового формата и не переписывается.
+
+        _load ищет ТОЛЬКО новое имя -> старый файл не виден как запись
+        (get_state -> None, отсутствие записи — нормальная ситуация);
+        list_states обнаруживает неформатное имя как повреждение
+        (fail-closed, без молчаливого пропуска и без автоматической
+        миграции/удаления).
+        """
+        st = ss.StrategyState.create(
+            "alpha__beta", "FIGI1", HASH_A, data={"old": True},
+            now=STAMP_T1)
+        legacy_name = "alpha__beta__FIGI1.json"  # старый неинъективный шаблон
+        with open(os.path.join(store_path, legacy_name), "w",
+                  encoding="utf-8") as handle:
+            handle.write(st.to_json())
+        legacy_bytes = read_legacy = open(
+            os.path.join(store_path, legacy_name), "rb").read()
+        # Новое имя для этой пары другое: старая запись не видна (нет
+        # скрытой миграции), состояние не переписывается.
+        assert store.get_state("alpha__beta", "FIGI1") is None
+        with open(os.path.join(store_path, legacy_name), "rb") as handle:
+            assert handle.read() == read_legacy
+        # Неформатное имя обнаруживается при перечислении (fail-closed).
+        with pytest.raises(ss.StateCorruptionError):
+            store.list_states()
+        assert legacy_bytes  # файл не удалён и не изменён
+
+    def test_decode_rejects_garbage_names(self):
+        bad_names = [
+            "",
+            "notes.json",
+            "s_a__FIGI_X.json",          # старый формат
+            ".tmp-state-x.json",
+            "12--abc.json",              # нет второй компоненты
+            "12--abc--5.json",           # нет второго префикса длины
+            "12--abc--x--def.json",      # второй префикс не число
+            "x--abc--2--de.json",        # первый префикс не число
+            "3--ab--2--cd.json",         # длина strategy_id не совпадает
+            "4--abc--2--cd.json",        # длина strategy_id не совпадает
+            "3--abc--2--cde.json",       # длина figi не совпадает
+            "3--abc--2--cd.json.bak",    # неверный суффикс
+        ]
+        for name in bad_names:
+            with pytest.raises(ss.StateCorruptionError):
+                ss.decode_state_filename(name)
+
+    def test_list_states_detects_old_and_foreign_names(self, store_path):
+        """Файлы, не декодируемые алгоритмом Stage B.1 (старый формат,
+        чужие имена), обнаруживаются при list_states — не пропускаются
+        молча и не маскируются."""
+        store = ss.StateStore(path=store_path)
+        store.create_state("s_a", "FIGI_X", HASH_A)
+        with open(os.path.join(store_path, "s_a__FIGI_X.json"), "w",
+                  encoding="utf-8") as handle:
+            handle.write("{}")  # старое имя + произвольное содержимое
+        with pytest.raises(ss.StateCorruptionError):
+            store.list_states()
+
+
+# ---------------------------------------------------------------------------
+# ДЕФЕКТ №2 — проверка ключа после чтения
+# ---------------------------------------------------------------------------
+
+
+class TestPostReadKeyVerification:
+    def _make_tampered_payload(self, sid, figi, foreign_sid=None,
+                               foreign_figi=None):
+        payload = ss.StrategyState.create(
+            sid, figi, HASH_A, data={"n": 1}, now=STAMP_T1).to_payload()
+        if foreign_sid is not None:
+            payload["strategy_id"] = foreign_sid
+        if foreign_figi is not None:
+            payload["figi"] = foreign_figi
+        return payload
+
+    def test_foreign_strategy_id_detected(self, store, store_path):
+        """ТЗ Stage B.1 §6.5: подмена содержимого файла чужим strategy_id
+        обнаруживается."""
+        name = ss.encode_state_filename("s_a", "FIGI_X")
+        with open(os.path.join(store_path, name), "w",
+                  encoding="utf-8") as handle:
+            json.dump(self._make_tampered_payload(
+                "s_a", "FIGI_X", foreign_sid="s_evil"), handle)
+        with pytest.raises(ss.StateCorruptionError):
+            store.get_state("s_a", "FIGI_X")
+        with pytest.raises(ss.StateCorruptionError):
+            store.get_state("s_a", "FIGI_X", config_hash=HASH_A)
+        # Состояние не возвращается и в менеджере; запись не создаётся.
+        manager = ss.StrategyStateManager(store)
+        with pytest.raises(ss.StateCorruptionError):
+            manager.get_state("s_a", "FIGI_X", config_hash=HASH_A)
+        with pytest.raises(ss.StateCorruptionError):
+            manager.update_state("s_a", "FIGI_X", config_hash=HASH_A,
+                                 data={"n": 2})
+
+    def test_foreign_figi_detected(self, store, store_path):
+        """ТЗ Stage B.1 §6.6: подмена содержимого файла чужим FIGI
+        обнаруживается."""
+        name = ss.encode_state_filename("s_a", "FIGI_X")
+        with open(os.path.join(store_path, name), "w",
+                  encoding="utf-8") as handle:
+            json.dump(self._make_tampered_payload(
+                "s_a", "FIGI_X", foreign_figi="FIGI_EVIL"), handle)
+        with pytest.raises(ss.StateCorruptionError):
+            store.get_state("s_a", "FIGI_X")
+
+    def test_verification_error_does_not_modify_file(self, store,
+                                                     store_path):
+        """ТЗ Stage B.1 §6.7: ошибка проверки не изменяет исходный файл."""
+        name = ss.encode_state_filename("s_a", "FIGI_X")
+        tampered = json.dumps(self._make_tampered_payload(
+            "s_a", "FIGI_X", foreign_sid="s_evil"))
+        with open(os.path.join(store_path, name), "w",
+                  encoding="utf-8") as handle:
+            handle.write(tampered)
+        before = read_bytes(store_path, "s_a", "FIGI_X")
+        with pytest.raises(ss.StateCorruptionError):
+            store.get_state("s_a", "FIGI_X")
+        with pytest.raises(ss.StateCorruptionError):
+            store.update_state("s_a", "FIGI_X", config_hash=HASH_A,
+                               data={"n": 9})
+        with pytest.raises(ss.StateCorruptionError):
+            store.list_states()
+        after = read_bytes(store_path, "s_a", "FIGI_X")
+        assert before == after == tampered.encode("utf-8")
+        # Файл не исправлен, не заменён пустой записью, не удалён.
+        assert listdir_names(store_path) == [name]
+
+    def test_save_state_does_not_silently_overwrite_foreign_content(
+            self, store, store_path):
+        """save_state не переписывает повреждённую/подменённую запись:
+        чтение существующей записи даёт StateCorruptionError."""
+        name = ss.encode_state_filename("s_a", "FIGI_X")
+        with open(os.path.join(store_path, name), "w",
+                  encoding="utf-8") as handle:
+            json.dump(self._make_tampered_payload(
+                "s_a", "FIGI_X", foreign_figi="FIGI_EVIL"), handle)
+        fresh = ss.StrategyState.create(
+            "s_a", "FIGI_X", HASH_A, data={"n": 5}, now=STAMP_T1)
+        with pytest.raises(ss.StateCorruptionError):
+            store.save_state("s_a", "FIGI_X", fresh)
+
+    def test_key_check_in_memory_mode_unified_contract(self):
+        """Единый контракт: проверка ключа после чтения выполняется и в
+        memory-режиме (рассинхронизация содержимого и ключа хранения
+        обнаруживается)."""
+        store = ss.StateStore()
+        st = ss.StrategyState.create(
+            "s_evil", "FIGI_X", HASH_A, data={"n": 1}, now=STAMP_T1)
+        # Белый ящик: имитация рассинхронизации внутренней записи.
+        store._records[("s_a", "FIGI_X")] = st
+        with pytest.raises(ss.StateCorruptionError):
+            store.get_state("s_a", "FIGI_X")
+        with pytest.raises(ss.StateCorruptionError):
+            store.list_states()
+        with pytest.raises(ss.StateCorruptionError):
+            store.update_state("s_a", "FIGI_X", config_hash=HASH_A,
+                               data={"n": 2})
+
+    def test_create_state_detects_foreign_content(self, store, store_path):
+        """create_state не маскирует подмену чужим ключом как
+        StateAlreadyExistsError: сначала обнаруживается повреждение."""
+        name = ss.encode_state_filename("s_a", "FIGI_X")
+        with open(os.path.join(store_path, name), "w",
+                  encoding="utf-8") as handle:
+            json.dump(self._make_tampered_payload(
+                "s_a", "FIGI_X", foreign_sid="s_evil"), handle)
+        with pytest.raises(ss.StateCorruptionError):
+            store.create_state("s_a", "FIGI_X", HASH_A)
+
+
+# ---------------------------------------------------------------------------
+# ДЕФЕКТ №3 — атомарный read-modify-write между менеджерами
+# ---------------------------------------------------------------------------
+
+
+def increment_updater(current):
+    return {"n": current.data.get("n", 0) + 1}
+
+
+class TestCrossManagerAtomicRMW:
+    def test_two_managers_one_store_parallel_updaters_no_lost_update(
+            self, store):
+        """ТЗ Stage B.1 §6.9: два менеджера с одним StateStore выполняют
+        параллельные updater-операции без потери обновлений.
+
+        Атомарность обеспечивает RLock ХРАНИЛИЩА (StateStore.update_state),
+        а не локальные RLock менеджеров: 2 менеджера x 4 потока x 25
+        инкрементов = ровно 200.
+        """
+        mgr1 = ss.StrategyStateManager(store)
+        mgr2 = ss.StrategyStateManager(store)
+
+        def worker(task):
+            mgr, _ = task
+            for _ in range(25):
+                mgr.update_state("s_a", "FIGI_X", config_hash=HASH_A,
+                                 updater=increment_updater)
+
+        tasks = [(mgr1, i) for i in range(4)] + [(mgr2, i) for i in range(4)]
+        with ThreadPoolExecutor(max_workers=8) as pool:
+            list(pool.map(worker, tasks))
+
+        final = store.get_state("s_a", "FIGI_X")
+        assert final.data["n"] == 200  # ни одно обновление не потеряно
+
+    def test_repeated_concurrent_run_is_deterministic(self, store_path):
+        """ТЗ Stage B.1 §6.10: повторный конкурентный тест даёт
+        детерминированный итог — одинаковое число инкрементов и
+        побайтово одинаковую запись (метки времени фиксированы)."""
+        results = []
+        for _ in range(2):
+            path = f"{store_path}_run{len(results)}"
+            store = ss.StateStore(path=path)
+            # Фиксированный «часы» менеджеров: метки времени записей
+            # детерминированы, сравниваются байты, а не только данные.
+            mgr1 = ss.StrategyStateManager(store, clock=lambda: STAMP_T1)
+            mgr2 = ss.StrategyStateManager(store, clock=lambda: STAMP_T1)
+
+            def worker(task):
+                mgr, i = task
+                for step in range(20):
+                    mgr.update_state("s_a", "FIGI_X", config_hash=HASH_A,
+                                     updater=increment_updater,
+                                     now=STAMP_T1)
+
+            tasks = [(mgr1, i) for i in range(3)] + \
+                    [(mgr2, i) for i in range(3)]
+            with ThreadPoolExecutor(max_workers=6) as pool:
+                list(pool.map(worker, tasks))
+            final = store.get_state("s_a", "FIGI_X")
+            assert final.data["n"] == 6 * 20
+            results.append(read_bytes(path, "s_a", "FIGI_X"))
+        # Детерминированный итог: обе гонки дали байт-в-байт одну запись.
+        assert results[0] == results[1]
+
+    def test_updater_error_in_store_update_leaves_state_unchanged(
+            self, store, store_path):
+        """ТЗ Stage B.1 §6.11: ошибка updater не меняет сохранённое
+        состояние (store.update_state)."""
+        store.update_state("s_a", "FIGI_X", config_hash=HASH_A,
+                           data={"n": 1}, now=STAMP_T1)
+        before = read_bytes(store_path, "s_a", "FIGI_X")
+
+        def failing_updater(current):
+            assert current.data["n"] == 1
+            raise RuntimeError("updater failed")
+
+        with pytest.raises(RuntimeError):
+            store.update_state("s_a", "FIGI_X", config_hash=HASH_A,
+                               updater=failing_updater)
+        after = read_bytes(store_path, "s_a", "FIGI_X")
+        assert before == after
+        assert dict(store.get_state("s_a", "FIGI_X").data) == {"n": 1}
+
+        # Не-отображение в результате updater — StateValidationError,
+        # запись тоже не меняется.
+        with pytest.raises(ss.StateValidationError):
+            store.update_state("s_a", "FIGI_X", config_hash=HASH_A,
+                               updater=lambda cur: [1, 2])
+        assert read_bytes(store_path, "s_a", "FIGI_X") == before
+
+    def test_updater_error_via_manager_leaves_state_unchanged(
+            self, manager, store_path):
+        """Ошибка updater через менеджер не меняет состояние (путь
+        manager -> store.update_state)."""
+        manager.update_state("s_a", "FIGI_X", config_hash=HASH_A,
+                             data={"n": 1}, now=STAMP_T1)
+        before = read_bytes(store_path, "s_a", "FIGI_X")
+        with pytest.raises(RuntimeError):
+            manager.update_state("s_a", "FIGI_X", config_hash=HASH_A,
+                                 updater=lambda cur: (_ for _ in ()).throw(
+                                     RuntimeError("boom")))
+        assert read_bytes(store_path, "s_a", "FIGI_X") == before
+
+    def test_store_update_state_config_mismatch_rejected_before_updater(
+            self, store, store_path):
+        """Несовпадение config_hash в store.update_state отклоняется ДО
+        вызова updater; запись не изменяется."""
+        store.update_state("s_a", "FIGI_X", config_hash=HASH_A,
+                           data={"n": 1}, now=STAMP_T1)
+        before = read_bytes(store_path, "s_a", "FIGI_X")
+        called = []
+
+        def updater(current):
+            called.append(current)
+            return {"n": 999}
+
+        with pytest.raises(ss.StateConfigMismatchError):
+            store.update_state("s_a", "FIGI_X", config_hash=HASH_B,
+                               updater=updater)
+        assert called == []  # updater не вызывался
+        assert read_bytes(store_path, "s_a", "FIGI_X") == before
+        assert dict(store.get_state("s_a", "FIGI_X").data) == {"n": 1}
+
+    def test_store_update_state_creates_missing_pair_atomically(
+            self, store):
+        """store.update_state на отсутствующей записи создаёт её в той же
+        атомарной операции; created_at/updated_at — из created_now/now."""
+        st = store.update_state(
+            "s_a", "FIGI_X", config_hash=HASH_A,
+            data={"n": 1}, now=STAMP_T2, created_now=STAMP_T1)
+        assert st.created_at == STAMP_T1
+        assert st.updated_at == STAMP_T2
+        assert dict(st.data) == {"n": 1}
+        # Повторное создание не происходит: существующая запись обновлена.
+        st2 = store.update_state(
+            "s_a", "FIGI_X", config_hash=HASH_A,
+            data={"n": 2}, now=STAMP_T2, created_now=STAMP_T1)
+        assert st2.created_at == STAMP_T1
+        assert len(store.list_states()) == 1
+
+    def test_get_or_create_atomic_across_managers(self, store):
+        """get_or_create атомарен относительно нескольких менеджеров:
+        12 потоков двух менеджеров на отсутствующей паре -> одна запись,
+        все потоки получили одно состояние."""
+        mgr1 = ss.StrategyStateManager(store)
+        mgr2 = ss.StrategyStateManager(store)
+
+        def worker(task):
+            mgr, _ = task
+            return mgr.get_state("s_a", "FIGI_X", config_hash=HASH_A)
+
+        tasks = [(mgr1, i) for i in range(6)] + [(mgr2, i) for i in range(6)]
+        with ThreadPoolExecutor(max_workers=12) as pool:
+            results = list(pool.map(worker, tasks))
+        assert len(results) == 12
+        assert all(st.key() == ("s_a", "FIGI_X") for st in results)
+        assert all(st.config_hash == HASH_A for st in results)
+        assert len(store.list_states()) == 1
+
+    def test_store_update_state_requires_exactly_one_data_source(self, store):
+        with pytest.raises(ss.StateValidationError):
+            store.update_state("s_a", "FIGI_X", config_hash=HASH_A)
+        with pytest.raises(ss.StateValidationError):
+            store.update_state("s_a", "FIGI_X", config_hash=HASH_A,
+                               data={"n": 1},
+                               updater=lambda cur: {"n": 2})
+
+    def test_manager_and_store_updates_share_one_atomic_path(
+            self, manager, store):
+        """Менеджер и прямые операции хранилища сериализуются одним
+        замком: смешанные инкременты дают точный итог."""
+        manager.update_state("s_a", "FIGI_X", config_hash=HASH_A,
+                             data={"n": 0})
+
+        def worker(task):
+            kind, _ = task
+            if kind == "mgr":
+                manager.update_state("s_a", "FIGI_X", config_hash=HASH_A,
+                                     updater=increment_updater)
+            else:
+                store.update_state("s_a", "FIGI_X", config_hash=HASH_A,
+                                   updater=increment_updater)
+
+        tasks = ([("mgr", i) for i in range(30)] +
+                 [("store", i) for i in range(30)])
+        with ThreadPoolExecutor(max_workers=8) as pool:
+            list(pool.map(worker, tasks))
+        assert store.get_state("s_a", "FIGI_X").data["n"] == 60
+
+    def test_parallel_distinct_pairs_two_managers_isolated(self, store):
+        """ТЗ Stage B.1 §6 (доп.): независимость разных пар при
+        параллельной работе — два менеджера работают по ВСЕМ парам
+        вперемешку (включая ранее коллизионные), каждая пара содержит
+        только свои данные."""
+        pairs = [COLLIDING_PAIR_1, COLLIDING_PAIR_2,
+                 ("s_1", "FIGI_1"), ("s_2", "FIGI_2"),
+                 ("s_1", "FIGI_3"), ("s_2__x", "FIGI_4"),
+                 ("s_2", "x__FIGI_5"), ("s_3", "F.1-2_3")]
+        mgr1 = ss.StrategyStateManager(store)
+        mgr2 = ss.StrategyStateManager(store)
+
+        def worker(task):
+            mgr, i = task
+            sid, figi = pairs[i % len(pairs)]
+            for step in range(10):
+                mgr.update_state(sid, figi, config_hash=HASH_A,
+                                 data={"owner": i % len(pairs),
+                                       "step": step})
+                st = mgr.get_state(sid, figi, config_hash=HASH_A)
+                assert st.data["owner"] == i % len(pairs)
+
+        tasks = [(mgr1, i) for i in range(16)] + [(mgr2, i) for i in range(16)]
+        with ThreadPoolExecutor(max_workers=10) as pool:
+            list(pool.map(worker, tasks))
+
+        assert len(store.list_states()) == len(pairs)
+        for i, (sid, figi) in enumerate(pairs):
+            st = store.get_state(sid, figi)
+            assert st.data["owner"] == i
+            assert st.data["step"] == 9
+
+    def test_shared_path_lock_serializes_two_store_instances(
+            self, store_path):
+        """Два экземпляра StateStore на одном пути одного процесса
+        разделяют один RLock (усиление Stage B.1): параллельные
+        инкременты через РАЗНЫЕ экземпляры не теряются."""
+        store1 = ss.StateStore(path=store_path)
+        store2 = ss.StateStore(path=store_path)
+        assert store1._lock is store2._lock  # один разделяемый замок
+
+        def worker(i):
+            target = store1 if i % 2 == 0 else store2
+            for _ in range(15):
+                target.update_state("s_a", "FIGI_X", config_hash=HASH_A,
+                                    updater=increment_updater)
+
+        with ThreadPoolExecutor(max_workers=8) as pool:
+            list(pool.map(worker, range(8)))
+        assert store1.get_state("s_a", "FIGI_X").data["n"] == 8 * 15
+
+    def test_concurrent_updates_of_previously_colliding_pairs(
+            self, store):
+        """Параллельная работа именно на ранее коллизионных парах:
+        обновления не пересекаются (дефект №1 закрыт и под нагрузкой)."""
+        mgr1 = ss.StrategyStateManager(store)
+        mgr2 = ss.StrategyStateManager(store)
+
+        def worker(task):
+            mgr, i = task
+            sid, figi = COLLIDING_PAIR_1 if i % 2 == 0 else COLLIDING_PAIR_2
+            for step in range(15):
+                mgr.update_state(sid, figi, config_hash=HASH_A,
+                                 updater=increment_updater)
+                st = mgr.get_state(sid, figi, config_hash=HASH_A)
+                assert st.data["n"] >= step
+
+        tasks = ([(mgr1, i) for i in range(4)] +
+                 [(mgr2, i) for i in range(4)])
+        with ThreadPoolExecutor(max_workers=8) as pool:
+            list(pool.map(worker, tasks))
+        # Итог детерминирован: 4 потока x 15 инкрементов на каждую пару.
+        assert store.get_state(*COLLIDING_PAIR_1).data["n"] == 60
+        assert store.get_state(*COLLIDING_PAIR_2).data["n"] == 60
+
+    def test_manager_updater_reentrancy_same_store_allowed(self, store):
+        """Повторный вход в ТО ЖЕ хранилище из updater разрешён (RLock
+        реентерабелен): взаимных блокировок нет."""
+        store.update_state("s_a", "FIGI_X", config_hash=HASH_A,
+                           data={"n": 1})
+
+        def reentrant_updater(current):
+            # Чтение и обновление ДРУГОЙ пары того же хранилища из
+            # updater того же потока (get_or_create — тоже атомарная
+            # операция этого же хранилища; RLock реентерабелен).
+            other = store.get_or_create("s_b", "FIGI_X",
+                                        config_hash=HASH_A)
+            assert other is not None
+            store.update_state("s_b", "FIGI_X", config_hash=HASH_A,
+                               data={"seen": current.data["n"]})
+            return {"n": current.data["n"] + 1}
+
+        st = store.update_state("s_a", "FIGI_X", config_hash=HASH_A,
+                                updater=reentrant_updater)
+        assert st.data["n"] == 2
+        assert dict(store.get_state("s_b", "FIGI_X").data) == {"seen": 1}
+
+    def test_concurrent_operations_survive_repeated_scheduling(
+            self, store):
+        """Повтор серии конкурентных смешанных операций даёт тот же
+        инвариант: итог каждой пары зависит только от её операций."""
+        for _ in range(2):
+            store.reset_state("s_a", "FIGI_X")
+            store.reset_state("s_b", "FIGI_X")
+
+            def worker(task):
+                kind, i = task
+                sid = "s_a" if i % 2 == 0 else "s_b"
+                if kind == "inc":
+                    store.update_state(sid, "FIGI_X", config_hash=HASH_A,
+                                       updater=increment_updater)
+                else:
+                    st = store.get_state(sid, "FIGI_X",
+                                         config_hash=HASH_A)
+                    assert st.data.get("n", 0) >= 0
+
+            tasks = ([("inc", i) for i in range(24)] +
+                     [("read", i) for i in range(12)])
+            with ThreadPoolExecutor(max_workers=6) as pool:
+                list(pool.map(worker, tasks))
+            # 12 инкрементов на каждую пару за каждый повтор.
+            assert store.get_state("s_a", "FIGI_X").data["n"] == 12
+            assert store.get_state("s_b", "FIGI_X").data["n"] == 12
+
+
+# ---------------------------------------------------------------------------
+# Контракт Stage B не сломан (интеграция Stage A без изменений)
+# ---------------------------------------------------------------------------
+
+
+class TestStageBContractPreserved:
+    def test_public_interface_unchanged(self):
+        """Минимальный интерфейс StateStore (ТЗ Stage B §3.2) сохранён;
+        атомарные get_or_create/update_state — ДОПОЛНЕНИЕ Stage B.1."""
+        for method in ("get_state", "save_state", "create_state",
+                       "reset_state", "list_states"):
+            assert callable(getattr(ss.StateStore, method))
+        for method in ("get_or_create", "update_state"):
+            assert callable(getattr(ss.StateStore, method))
+
+    def test_filename_encoding_documented_constants(self):
+        """Алгоритм кодирования фиксируется функциями модуля и
+        обратим (контракт Stage B.1 §3.1)."""
+        name = ss.encode_state_filename("s_a", "FIGI_X")
+        assert name.endswith(".json")
+        assert ss.decode_state_filename(name) == ("s_a", "FIGI_X")
+
+```
+
+## 4. Проверка полноты
+
+```
+diff -rq <Stage B>/candidate <Stage B.1>/candidate
+  Files .../candidate/strategy_state.py ... differ
+  Files .../candidate/tests/test_stage_b_state_isolation.py ... differ
+  Only in <Stage B.1>/candidate/tests: test_stage_b1_state_key_and_concurrency.py
+```
+
+Иных отличий нет: остальные 169 файлов `candidate/` Stage B.1 побайтово
+совпадают с пакетом Stage B (см. CHANGED_FILES_STAGE_B.md, раздел 4).

@@ -1,0 +1,2113 @@
+diff --git a/stage_a_zip/SAMSUNG_V4_STAGE_A/candidate/attribution.py b/stage_a1/candidate/attribution.py
+index 74e3fbe..6e096fb 100755
+--- a/stage_a_zip/SAMSUNG_V4_STAGE_A/candidate/attribution.py
++++ b/stage_a1/candidate/attribution.py
+@@ -1,47 +1,92 @@
+ # attribution.py
+-# SAMSUNG V4 — NEW STRATEGY ENGINE. STAGE A.
++# SAMSUNG V4 — NEW STRATEGY ENGINE. STAGE A (+ STAGE A.1 CORRECTIONS).
+ # Атрибуция торговых объектов к стратегии и её конфигурации.
+ #
+ # НАЗНАЧЕНИЕ
+-#   Каждый НОВЫЙ объект, создаваемый движком (события, новые записи
+-#   ордеров, новые позиции, новые строки торгового CSV, записи
+-#   исследовательских журналов), должен нести:
++#   Каждый НОВЫЙ объект, создаваемый НОВЫМ движком (события, новые
++#   виртуальные ордера, новые виртуальные позиции, новые строки
++#   исследовательского CSV/JSONL), должен нести:
+ #       strategy_id, config_hash
+ #   чтобы однозначно установить источник объекта.
+ #
++# ЕДИНЫЙ ЯВНЫЙ МЕХАНИЗМ ПЕРЕДАЧИ КОНТЕКСТА (Stage A.1, замечания №2 и №3)
++#   Единственный источник атрибуции — ЯВНО переданный неизменяемый
++#   AttributionContext (или StrategyConfig, из которого контекст выводится
++#   методом AttributionContext.from_config). Глобального изменяемого
++#   состояния НЕ СУЩЕСТВУЕТ: set_current_context / get_current_context /
++#   clear_current_context и модульная переменная _current_context УДАЛЕНЫ
++#   как обязательный источник атрибуции (замечание №3 аудита Stage A.1).
++#   Причина: глобальное состояние при параллельной работе или переключении
++#   стратегий может присвоить объекту контекст другой стратегии.
++#
++#   Правила создания НОВЫХ атрибутированных объектов (fail-closed):
++#     * контекст не передан          -> AttributionRequiredError
++#      (или TypeError при отсутствующем аргументе — ошибки равнозначны);
++#     * фиктивные значения (UNKNOWN, пустые строки, случайные заглушки)
++#       НЕ используются никогда;
++#     * конфликт переданных полей атрибуции с контекстом -> объект НЕ
++#       создаётся (AttributionError), состояние фабрики не искажается;
++#     * входные записи не мутируются (возвращаются копии).
++#
+ # ОБРАТНАЯ СОВМЕСТИМОСТЬ (обязательство Этапа A):
+ #   * существующие исторические записи могут не иметь этих полей;
+-#   * старые записи НЕ переписываются, миграции НЕТ, исторические CSV
++#   * старые записи НЕ переписываются, миграции НЕТ, исторические CSV/JSONL
+ #     не меняются задним числом, выдуманные значения не подставляются;
+-#   * для старых объектов отсутствие полей обрабатывается явно и
+-#     безопасно (legacy_attribution_view: None/False, никакой фальши);
+-#   * для НОВЫХ объектов отсутствие атрибуции выявляется тестами и
+-#     НЕ маскируется фиктивными значениями (fail-closed).
++#   * для старых объектов отсутствие полей обрабатывается явно и безопасно
++#     (legacy_attribution_view / read_*_attribution_report: None/False);
++#   * чтение старого объекта НИКОГДА не добавляет ему атрибуцию.
+ #
+-# ГРАНИЦЫ ЭТАПА A (честно задокументировано в IMPLEMENTATION_REPORT.md):
+-#   * этот модуль — инфраструктура атрибуции нового движка; в производственный
+-#     поток main.py/execution.py/logger.py он Этапом A НЕ встраивается:
+-#     встраивание потребовало бы изменения схемы research_trades.csv
+-#     (авто-ротация шапки у пользователя) и правок механизма исполнения —
+-#     это зафиксировано как блокер с минимальным решением для Этапа B;
+-#   * production-файлы baseline (logger.py и др.) НЕ изменены.
++# ГРАНИЦА ЭТАПА A.1 (честно задокументировано, замечание №2 аудита):
++#   ЭТОТ МОДУЛЬ — САМОСТОЯТЕЛЬНЫЙ ИНТЕРФЕЙС АТРИБУЦИИ НОВОГО ДВИЖКА.
++#   Что РЕАЛИЗОВАНО и протестировано на Stage A/A.1:
++#     * AttributionContext — неизменяемая пара (strategy_id, config_hash);
++#     * AttributionFactory — фабрика атрибутированных объектов, привязанная
++#       к одному контексту (явное внедрение зависимости; новые события —
++#       new_event, новые виртуальные ордера — new_virtual_order, новые
++#       виртуальные позиции — new_virtual_position, новые строки
++#       исследовательского CSV/JSONL — append_csv_row/append_jsonl_row);
++#     * stamp() — штампование произвольной записи с ЯВНЫМ контекстом;
++#     * append_attributed_csv_row / append_attributed_jsonl_row — журналы
++#       ТОЛЬКО новых записей движка;
++#     * чтение старых записей без атрибуции (CSV и JSONL) — без миграции.
++#   Чего Stage A/A.1 сознательно НЕ делает:
++#     * НЕ встраивает атрибуцию в производственный поток baseline
++#       (main.py / execution.py / logger.py / order_ledger.py не изменены):
++#       встраивание потребовало бы изменения схемы research_trades.csv
++#       (авто-ротация шапки у пользователя) и правок механизма исполнения —
++#       зафиксировано как блокер с минимальным решением для Этапа B
++#       (см. CORRECTIVE_IMPLEMENTATION_REPORT.md, раздел «Граница Этапа A»);
++#     * НЕ выдаёт изолированный интерфейс за уже внедрённую производственную
++#       атрибуцию: типы новых объектов атрибутируются ЧЕРЕЗ интерфейс
++#       нового движка; подключение к будущим компонентам движка предусмотрено
++#       архитектурно (AttributionFactory создаётся из EngineConfig.attribution
++#       — см. engine_config.require_trading_ready) и выполняется на
++#       следующих этапах.
++#
++# Параллельная работа: фабрики изолированы (у каждой свой неизменяемый
++# контекст, никакой общей изменяемости); корректность при одновременной
++# работе двух стратегий доказана тестами
++# tests/test_stage_a1_attribution_explicit.py (в том числе потоками).
+ #
+ # STRATEGY LOGIC: UNCHANGED. RESEARCH ONLY. NO LIVE ORDERS.
+ 
+ from __future__ import annotations
+ 
+ import csv
++import json
+ import os
+ from dataclasses import dataclass
+-from typing import Any, Iterable, List, Mapping, Optional, Sequence
++from typing import Any, List, Mapping, Optional, Sequence, Union
++
++from strategy_api import StrategyConfig
+ 
+ 
+ ATTRIBUTION_FIELDS = ("strategy_id", "config_hash")
+ 
+ # Предложение для Этапа B: добавить эти два поля В КОНЕЦ TRADE_FIELDS
+ # logger.py (существующий механизм авто-миграции шапки сохранит старый
+-# журнал как research_trades_<timestamp>.bak.csv). Этап A это изменение
+-# сознательно НЕ выполняет — см. шапку модуля и отчёт.
++# журнал как research_trades_<timestamp>.bak.csv). Этапы A и A.1 это
++# изменение сознательно НЕ выполняют — см. шапку модуля и отчёт.
+ TRADE_ATTRIBUTION_FIELDS = ATTRIBUTION_FIELDS
+ 
+ 
+@@ -50,12 +95,17 @@ class AttributionError(Exception):
+ 
+ 
+ class AttributionRequiredError(AttributionError):
+-    """Новый объект не может быть создан без атрибуции (fail-closed)."""
++    """Новый объект не может быть создан без явного контекста (fail-closed)."""
+ 
+ 
+ @dataclass(frozen=True)
+ class AttributionContext:
+-    """Пара (strategy_id, config_hash) активной конфигурации движка."""
++    """Неизменяемая пара (strategy_id, config_hash) активной конфигурации.
++
++    Единственный источник атрибуции нового движка. Передаётся ЯВНО в
++    функции создания объектов либо привязывается к AttributionFactory
++    (явное внедрение зависимости).
++    """
+     strategy_id: str
+     config_hash: str
+ 
+@@ -73,31 +123,50 @@ class AttributionContext:
+             "config_hash": self.config_hash,
+         }
+ 
++    @classmethod
++    def from_config(cls, config: Any) -> "AttributionContext":
++        """Единый явный механизм: контекст из StrategyConfig.
+ 
+-# ---------------------------------------------------------------------------
+-# Текущий контекст атрибуции движка (явно управляемый, без «тихих» умолчаний)
+-# ---------------------------------------------------------------------------
+-
+-_current_context: Optional[AttributionContext] = None
+-
+-
+-def set_current_context(context: AttributionContext) -> None:
+-    """Явно установить текущий контекст атрибуции (после CONFIGURED)."""
+-    global _current_context
+-    if not isinstance(context, AttributionContext):
+-        raise AttributionError("ожидается AttributionContext")
+-    _current_context = context
++        Принимается конфигурация контракта strategy_api (или любой объект
++        с валидными непустыми strategy_id/config_hash). None/пустые
++        значения -> AttributionError (никаких фиктивных значений).
++        """
++        if config is None:
++            raise AttributionError(
++                "AttributionContext.from_config: конфигурация не передана")
++        strategy_id = getattr(config, "strategy_id", None)
++        config_hash = getattr(config, "config_hash", None)
++        if not isinstance(strategy_id, str) or not strategy_id \
++                or not isinstance(config_hash, str) or not config_hash:
++            raise AttributionError(
++                "AttributionContext.from_config: объект без валидных "
++                "strategy_id/config_hash; фиктивные значения запрещены")
++        return cls(strategy_id=strategy_id, config_hash=config_hash)
+ 
+ 
+-def clear_current_context() -> None:
+-    """Явно снять текущий контекст атрибуции (UNCONFIGURED/CONFIG_ERROR)."""
+-    global _current_context
+-    _current_context = None
++# ГЛОБАЛЬНОЕ СОСТОЯНИЕ УДАЛЕНО (Stage A.1, замечание №3 аудита).
++# Ранее: _current_context + set_current_context()/get_current_context()/
++# clear_current_context(). Сейчас единственный источник атрибуции —
++# ЯВНО переданный контекст; функции создания объектов не обращаются ни
++# к какому глобальному/потоковому состоянию.
+ 
++def _resolve_context(
++        context: Optional[Union[AttributionContext, StrategyConfig]]
++) -> AttributionContext:
++    """Единая нормализация контекста (fail-closed).
+ 
+-def get_current_context() -> Optional[AttributionContext]:
+-    """Текущий контекст или None (объекты без контекста не создаются)."""
+-    return _current_context
++    AttributionContext возвращается как есть; StrategyConfig преобразуется
++    явно (from_config); None/пустые значения -> AttributionRequiredError
++    (никаких умолчаний, никаких фиктивных значений).
++    """
++    if isinstance(context, AttributionContext):
++        return context
++    if isinstance(context, StrategyConfig):
++        return AttributionContext.from_config(context)
++    raise AttributionRequiredError(
++        "контекст атрибуции не передан: новый объект движка создаётся "
++        "ТОЛЬКО с явным AttributionContext (или StrategyConfig); "
++        "глобальный контекст удалён, фиктивные значения запрещены")
+ 
+ 
+ # ---------------------------------------------------------------------------
+@@ -105,30 +174,33 @@ def get_current_context() -> Optional[AttributionContext]:
+ # ---------------------------------------------------------------------------
+ 
+ def stamp(record: Mapping[str, Any],
+-          context: Optional[AttributionContext] = None,
++          context: Union[AttributionContext, StrategyConfig],
+           *,
+           overwrite: bool = False) -> dict:
+     """Возвращает КОПИЮ record с добавленными strategy_id и config_hash.
+ 
+-    Правила:
+-      * контекст не передан и текущий контекст отсутствует ->
+-        AttributionRequiredError (никаких фиктивных значений);
++    Правила (Stage A.1):
++      * контекст ОБЯЗАТЕЛЕН и передаётся ЯВНО (AttributionContext или
++        StrategyConfig): его отсутствие -> AttributionRequiredError;
++        глобального источника атрибуции больше не существует;
+       * если в record уже есть поля атрибуции с ДРУГИМИ значениями —
+-        ошибка (перезапись только при overwrite=True);
++        объект не создаётся (AttributionError); перезапись только при
++        явном overwrite=True;
+       * входной record не мутируется.
+     """
+-    ctx = context if context is not None else get_current_context()
+-    if ctx is None:
+-        raise AttributionRequiredError(
+-            "новый объект требует атрибуции (strategy_id, config_hash): "
+-            "контекст не задан; фиктивные значения запрещены")
++    if not isinstance(record, Mapping):
++        raise AttributionError(
++            f"record должен быть отображением (Mapping), получено "
++            f"{type(record).__name__}")
++    ctx = _resolve_context(context)
+     result = dict(record)
+     for name in ATTRIBUTION_FIELDS:
+         ctx_value = getattr(ctx, name)
+         if name in result and result[name] != ctx_value and not overwrite:
+             raise AttributionError(
+                 f"поле {name} уже присутствует с другим значением; "
+-                "перезапись запрещена (overwrite=True для явного случая)")
++                "объект не создаётся; перезапись запрещена "
++                "(overwrite=True для явного случая)")
+         result[name] = ctx_value
+     return result
+ 
+@@ -147,8 +219,9 @@ def legacy_attribution_view(record: Mapping[str, Any]) -> dict:
+ 
+     Для исторических записей без полей атрибуции возвращает
+     has_attribution=False и None — НЕ подставляя никаких выдуманных
+-    значений. Результат предназначен для чтения/анализа в памяти;
+-    исторические файлы этот модуль никогда не перезаписывает.
++    значений и НЕ добавляя атрибуцию к записи. Результат предназначен
++    для чтения/анализа в памяти; исторические файлы этот модуль никогда
++    не перезаписывает.
+     """
+     view: dict = {"has_attribution": record_has_attribution(record)}
+     for name in ATTRIBUTION_FIELDS:
+@@ -158,23 +231,116 @@ def legacy_attribution_view(record: Mapping[str, Any]) -> dict:
+ 
+ 
+ # ---------------------------------------------------------------------------
+-# Новые CSV-журналы движка (только для НОВЫХ записей; старые файлы не трогаем)
++# Фабрика атрибутированных объектов нового движка (Stage A.1)
++# ---------------------------------------------------------------------------
++
++class AttributionFactory:
++    """Фабрика атрибутированных объектов, привязанная к ОДНОМУ контексту.
++
++    Архитектурная точка подключения для компонентов нового движка
++    (Этап B+): компонент получает экземпляр фабрики из своей конфигурации
++    (EngineConfig.attribution -> AttributionContext -> AttributionFactory)
++    и создаёт через неё ВСЕ новые объекты:
++
++      * new_event            — новый объект события (журнал JSONL);
++      * new_virtual_order    — новый виртуальный ордер;
++      * new_virtual_position — новая виртуальная позиция;
++      * append_csv_row       — новая строка исследовательского CSV;
++      * append_jsonl_row     — новая строка исследовательского JSONL;
++      * stamp                — произвольная новая запись.
++
++    Свойства:
++      * ЯВНОЕ внедрение зависимости: контекст задаётся при создании
++        фабрики (AttributionContext или StrategyConfig) и неизменяем;
++      * НЕТ глобального состояния: фабрики независимы, две стратегии с
++        разными контекстами не влияют друг на друга (в том числе при
++        параллельной работе — доказано тестами);
++      * исключение при создании объекта не оставляет «устаревшего»
++        контекста: контекст фабрики неизменяем по построению;
++      * конфликт атрибуции -> объект не создаётся (AttributionError).
++    """
++
++    __slots__ = ("_context",)
++
++    def __init__(
++        self, context: Union[AttributionContext, StrategyConfig]
++    ) -> None:
++        object.__setattr__(self, "_context", _resolve_context(context))
++
++    @property
++    def context(self) -> AttributionContext:
++        """Неизменяемый контекст фабрики (один на всю жизнь фабрики)."""
++        return self._context
++
++    def __setattr__(self, name: str, value: Any) -> None:
++        raise TypeError(
++            "AttributionFactory неизменяем: контекст не может быть заменён")
++
++    def stamp(self, record: Mapping[str, Any],
++              *, overwrite: bool = False) -> dict:
++        """Новая атрибутированная запись (копия record + атрибуция)."""
++        return stamp(record, self._context, overwrite=overwrite)
++
++    def new_event(self, event: Mapping[str, Any]) -> dict:
++        """НОВЫЙ объект события движка (strategy_id + config_hash)."""
++        return self._new_attributed(event, "event")
++
++    def new_virtual_order(self, order: Mapping[str, Any]) -> dict:
++        """НОВЫЙ виртуальный ордер движка (strategy_id + config_hash)."""
++        return self._new_attributed(order, "virtual_order")
++
++    def new_virtual_position(self, position: Mapping[str, Any]) -> dict:
++        """НОВАЯ виртуальная позиция движка (strategy_id + config_hash)."""
++        return self._new_attributed(position, "virtual_position")
++
++    def append_csv_row(self,
++                       path: str,
++                       row: Mapping[str, Any],
++                       base_fieldnames: Sequence[str],
++                       *,
++                       delimiter: str = ";") -> dict:
++        """Новая строка исследовательского CSV с атрибуцией.
++
++        Для журналов НОВОГО движка; исторические CSV не трогаются.
++        """
++        return append_attributed_csv_row(
++            path, row, base_fieldnames, context=self._context,
++            delimiter=delimiter)
++
++    def append_jsonl_row(self, path: str,
++                         record: Mapping[str, Any]) -> dict:
++        """Новая строка исследовательского JSONL с атрибуцией."""
++        return append_attributed_jsonl_row(path, record, context=self._context)
++
++    def _new_attributed(self, record: Mapping[str, Any],
++                        kind: str) -> dict:
++        if not isinstance(record, Mapping):
++            raise AttributionError(
++                f"{kind}: запись должна быть отображением (Mapping), "
++                f"получено {type(record).__name__}")
++        return self.stamp(record)
++
++
++# ---------------------------------------------------------------------------
++# Новые журналы движка (только для НОВЫХ записей; старые файлы не трогаем)
+ # ---------------------------------------------------------------------------
+ 
+ def append_attributed_csv_row(path: str,
+                               row: Mapping[str, Any],
+                               base_fieldnames: Sequence[str],
+                               *,
+-                              delimiter: str = ";",
+-                              context: Optional[AttributionContext] = None
++                              context: Union[AttributionContext,
++                                             StrategyConfig],
++                              delimiter: str = ";"
+                               ) -> dict:
+     """Дописывает в НОВЫЙ CSV-журнал движка строку с атрибуцией.
+ 
+-    Поля атрибуции добавляются В КОНЕЦ шапки (совместимо с существующими
+-    DictReader-читателями: старые читатели получают дополнительные ключи,
+-    базовые столбцы читаются как прежде). Отсутствие контекста — ошибка
+-    (fail-closed). Для исторических research_trades.csv функция НЕ
+-    применяется (production logger.py не изменён).
++    Контекст ОБЯЗАТЕЛЕН (явная передача; Stage A.1). Поля атрибуции
++    добавляются В КОНЕЦ шапки (совместимо с существующими DictReader-читателями:
++    старые читатели получают дополнительные ключи, базовые столбцы читаются
++    как прежде). Отсутствие контекста — ошибка (fail-closed). Для
++    исторических research_trades.csv функция НЕ применяется (production
++    logger.py не изменён).
+     """
+     stamped = stamp(row, context)
+     fieldnames: List[str] = list(base_fieldnames)
+@@ -192,6 +358,27 @@ def append_attributed_csv_row(path: str,
+     return write_row
+ 
+ 
++def append_attributed_jsonl_row(path: str,
++                                record: Mapping[str, Any],
++                                *,
++                                context: Union[AttributionContext,
++                                               StrategyConfig],
++                                encoding: str = "utf-8"
++                                ) -> dict:
++    """Дописывает в НОВЫЙ JSONL-журнал движка запись с атрибуцией.
++
++    Контекст ОБЯЗАТЕЛЕН (явная передача; Stage A.1). Формат — одна JSON-
++    строка на объект (аналог research_events.jsonl baseline, но для НОВЫХ
++    журналов движка; старые файлы не трогаются). NaN/Infinity в записи
++    отвергаются json-сериализацией (allow_nan=False, fail-closed).
++    """
++    stamped = stamp(record, context)
++    line = json.dumps(stamped, ensure_ascii=False, allow_nan=False)
++    with open(path, "a", encoding=encoding, newline="") as handle:
++        handle.write(line + "\n")
++    return stamped
++
++
+ def read_csv_attribution_report(path: str,
+                                 *,
+                                 delimiter: str = ";"
+@@ -199,10 +386,30 @@ def read_csv_attribution_report(path: str,
+     """Читает CSV и возвращает для каждой строки legacy_attribution_view.
+ 
+     Инструмент проверок обратной совместимости: старые записи без
+-    атрибуции читаются безопасно, с явными None; файл не изменяется.
++    атрибуции читаются безопасно, с явными None; файл не изменяется;
++    атрибуция к записям не добавляется.
+     """
+     views: List[dict] = []
+     with open(path, "r", encoding="utf-8", newline="") as handle:
+         for row in csv.DictReader(handle, delimiter=delimiter):
+             views.append(legacy_attribution_view(row))
+     return views
++
++
++def read_jsonl_attribution_report(path: str,
++                                  *,
++                                  encoding: str = "utf-8"
++                                  ) -> List[dict]:
++    """Читает JSONL и возвращает для каждой записи legacy_attribution_view.
++
++    Аналог read_csv_attribution_report для событий (JSONL): старые записи
++    без атрибуции читаются безопасно, с явными None; файл не изменяется.
++    """
++    views: List[dict] = []
++    with open(path, "r", encoding=encoding) as handle:
++        for line in handle:
++            stripped = line.strip()
++            if not stripped:
++                continue
++            views.append(legacy_attribution_view(json.loads(stripped)))
++    return views
+diff --git a/stage_a_zip/SAMSUNG_V4_STAGE_A/candidate/engine_config.py b/stage_a1/candidate/engine_config.py
+index ffbe8bb..3c23d5f 100755
+--- a/stage_a_zip/SAMSUNG_V4_STAGE_A/candidate/engine_config.py
++++ b/stage_a1/candidate/engine_config.py
+@@ -38,6 +38,13 @@
+ # config_hash: стратегия вычисляет его по контракту strategy_api
+ # (sha256 по каноническому JSON; секреты и runtime.env не участвуют).
+ #
++# АТРИБУЦИЯ (Stage A.1): EngineConfig несёт неизменяемый AttributionContext
++# (strategy_id, config_hash) для валидной CONFIGURED-конфигурации; контекст
++# выводится ЯВНО из StrategyConfig (AttributionContext.from_config) и
++# передаётся явно в фабрику атрибутированных объектов (AttributionFactory).
++# Глобального контекста атрибуции не существует; компоненты движка
++# получают контекст только через явные зависимости.
++#
+ # STRATEGY LOGIC: UNCHANGED. RESEARCH ONLY. NO LIVE ORDERS.
+ 
+ from __future__ import annotations
+@@ -274,10 +281,9 @@ def load_engine_config(*,
+         engine_json_present=json_present,
+         errors=(),
+         warnings=tuple(warnings),
+-        attribution=AttributionContext(
+-            strategy_id=config.strategy_id,
+-            config_hash=config.config_hash,
+-        ),
++        # Stage A.1: единый явный механизм — контекст выводится из
++        # StrategyConfig методом AttributionContext.from_config.
++        attribution=AttributionContext.from_config(config),
+     )
+ 
+ 
+diff --git a/stage_a_zip/SAMSUNG_V4_STAGE_A/candidate/strategy_api.py b/stage_a1/candidate/strategy_api.py
+index e11c9a6..f0ed7fc 100755
+--- a/stage_a_zip/SAMSUNG_V4_STAGE_A/candidate/strategy_api.py
++++ b/stage_a1/candidate/strategy_api.py
+@@ -25,6 +25,23 @@
+ #   * Никаких значений по умолчанию для торговых решений; отсутствие
+ #     обязательных параметров — ошибка, а не тихий fallback.
+ #
++# STAGE A.1 (исправление замечания №1 независимого аудита):
++#   @dataclass(frozen=True) защищает только атрибуты верхнего уровня.
++#   Вложенные структуры params/metadata теперь хранятся в ГЛУБОКО
++#   неизменяемых представлениях:
++#     * ImmutableMapping — отображение без операций записи; хранит копию
++#       содержимого в MappingProxyType, значения заморожены рекурсивно;
++#     * ImmutableList  — последовательность на базе tuple (C-уровневая
++#       неизменяемость), значения заморожены рекурсивно;
++#     * множества -> frozenset;
++#     * исходные словари КОПИРУЮТСЯ при создании: изменение источника
++#       после создания конфигурации не меняет её содержимое;
++#     * config_hash соответствует ФАКТИЧЕСКИ сохранённым параметрам
++#       (StrategyConfig.recompute_config_hash()).
++#   JSON-сериализация потребителей выполняется через StrategyConfig.as_dict()
++#   (плоская глубокая модифицируемая копия) — round-trip сохраняет семантику
++#   параметров и config_hash (тесты tests/test_stage_a1_config_immutability.py).
++#
+ # STRATEGY LOGIC: UNCHANGED. RESEARCH ONLY. NO LIVE ORDERS. NO BROKER
+ # EXECUTION. NO SANDBOX EXECUTION.
+ 
+@@ -33,8 +50,10 @@ from __future__ import annotations
+ import hashlib
+ import json
+ import math
++from collections.abc import Mapping as _MappingABC
+ from dataclasses import dataclass, field, fields as _dc_fields
+ from enum import Enum
++from types import MappingProxyType
+ from typing import Any, Iterable, List, Mapping, Optional, Sequence, Tuple
+ 
+ 
+@@ -50,6 +69,187 @@ class StrategyConfigError(StrategyContractError):
+     """Конфигурация стратегии невалидна: запуск с ней запрещён."""
+ 
+ 
++# ---------------------------------------------------------------------------
++# Глубоко неизменяемые структуры (Stage A.1, замечание №1 аудита)
++# ---------------------------------------------------------------------------
++
++class ImmutableMapping(_MappingABC):
++    """Глубоко неизменяемое отображение для params/metadata конфигурации.
++
++    Гарантии:
++      * операций записи НЕ существует: класс не реализует __setitem__/
++        __delitem__/update/pop/clear/setdefault (Mapping ABC содержит
++        только чтение), присвоение атрибутов запрещено (__setattr__);
++      * внутреннее хранилище — MappingProxyType поверх СОБСТВЕННОЙ копии
++        данных: даже запись через приватный атрибут _data отклоняется
++        на уровне C (TypeError);
++      * значения заморожены РЕКУРСИВНО (deep_freeze): вложенные dict ->
++        ImmutableMapping, list/tuple -> ImmutableList, set -> frozenset;
++      * при создании выполняется глубокая КОПИЯ: изменение исходных
++        объектов после создания не влияет на содержимое;
++      * ключи — только строки (fail-closed, как и в config_hash);
++      * равенство семантическое: ImmutableMapping == dict с тем же
++        содержимым (порядок ключей не важен);
++      * хешируемость: hash(ImmutableMapping) согласован с равенством
++        (необходимо для hash(StrategyConfig) frozen-дата класса).
++    """
++
++    __slots__ = ("_data",)
++
++    def __init__(self, source: Any = None, **kwargs: Any) -> None:
++        merged: dict = dict(source) if source is not None else {}
++        merged.update(kwargs)
++        frozen: dict = {}
++        for key, value in merged.items():
++            if not isinstance(key, str):
++                raise StrategyConfigError(
++                    f"ключи неизменяемого отображения должны быть "
++                    f"строками: {key!r}")
++            frozen[key] = deep_freeze(value)
++        object.__setattr__(self, "_data", MappingProxyType(frozen))
++
++    # --- чтение (только) ---------------------------------------------------
++
++    def __getitem__(self, key: str) -> Any:
++        return self._data[key]
++
++    def __iter__(self):
++        return iter(self._data)
++
++    def __len__(self) -> int:
++        return len(self._data)
++
++    def __contains__(self, key: object) -> bool:
++        return key in self._data
++
++    def get(self, key: str, default: Any = None) -> Any:
++        return self._data.get(key, default)
++
++    def keys(self):
++        return self._data.keys()
++
++    def values(self):
++        return self._data.values()
++
++    def items(self):
++        return self._data.items()
++
++    # --- семантика равенства и хеша ----------------------------------------
++
++    def __eq__(self, other: object) -> bool:
++        if isinstance(other, _MappingABC):
++            return dict(self._data) == dict(other)
++        return NotImplemented
++
++    def __hash__(self) -> int:
++        # согласован с __eq__: равные отображения -> равные хеши
++        return hash(frozenset(self._data.items()))
++
++    def __repr__(self) -> str:
++        return f"ImmutableMapping({dict(self._data)!r})"
++
++    # --- копирование и сериализация ----------------------------------------
++
++    def __reduce__(self):
++        # восстановление через __init__ сохраняет глубокую заморозку
++        # (работает для copy/deepcopy/pickle без обхода защиты записи)
++        return (ImmutableMapping, (dict(self._data),))
++
++    def to_mutable(self) -> dict:
++        """Плоская глубокая МОДИФИЦИРУЕМАЯ копия (JSON-совместимая)."""
++        return {key: unfreeze(value) for key, value in self._data.items()}
++
++    # --- защита от записи -----------------------------------------------------
++
++    def __setattr__(self, name: str, value: Any) -> None:
++        raise TypeError(
++            "ImmutableMapping неизменяем: операций записи не существует")
++
++    def __delattr__(self, name: str) -> None:
++        raise TypeError(
++            "ImmutableMapping неизменяем: операций удаления не существует")
++
++
++class ImmutableList(tuple):
++    """Глубоко неизменяемая последовательность (на базе tuple).
++
++    tuple гарантирует неизменяемость на C-уровне: у типа не существует
++    операций записи вообще (в отличие от dict-подклассов). Значения
++    заморожены рекурсивно (deep_freeze). Равенство семантическое:
++    ImmutableList == list/tuple с тем же содержимым (это делает
++    round-trip сериализации совместимым с исходными структурами).
++    """
++
++    __slots__ = ()
++
++    def __new__(cls, iterable: Any = ()) -> "ImmutableList":
++        return super().__new__(cls, (deep_freeze(item) for item in iterable))
++
++    def __getitem__(self, index: Any) -> Any:
++        result = super().__getitem__(index)
++        if isinstance(index, slice):
++            return ImmutableList(result)
++        return result
++
++    def __eq__(self, other: object) -> bool:
++        if isinstance(other, (list, tuple)):
++            return tuple(self) == tuple(other)
++        return NotImplemented
++
++    def __hash__(self) -> int:
++        # согласован с __eq__ (tuple-хеш)
++        return tuple.__hash__(self)
++
++    def __repr__(self) -> str:
++        return f"ImmutableList({list(self)!r})"
++
++    def __reduce__(self):
++        return (ImmutableList, (tuple(self),))
++
++    def to_mutable(self) -> list:
++        """Плоская глубокая МОДИФИЦИРУЕМАЯ копия (JSON-совместимая)."""
++        return [unfreeze(item) for item in self]
++
++
++def deep_freeze(value: Any) -> Any:
++    """Рекурсивная глубокая заморозка значения (Stage A.1).
++
++    Возвращает НЕЗАВИСИМУЮ неизменяемую копию:
++      * ImmutableMapping/ImmutableList — возвращаются как есть (уже заморожены);
++      * Mapping -> ImmutableMapping (глубокая копия);
++      * set/frozenset -> frozenset из замороженных элементов;
++      * list/tuple -> ImmutableList (глубокая копия);
++      * скаляры (None/bool/int/float/str/Enum/...) — как есть (уже
++        неизменяемы); никаких скрытых преобразований значений не выполняется.
++    """
++    if isinstance(value, (ImmutableMapping, ImmutableList)):
++        return value
++    if isinstance(value, Mapping):
++        return ImmutableMapping(value)
++    if isinstance(value, (set, frozenset)):
++        return frozenset(deep_freeze(item) for item in value)
++    if isinstance(value, (list, tuple)):
++        return ImmutableList(value)
++    return value
++
++
++def unfreeze(value: Any) -> Any:
++    """Глубокая МОДИФИЦИРУЕМАЯ копия замороженного значения.
++
++    Обратна deep_freeze: ImmutableMapping -> dict, ImmutableList -> list,
++    frozenset -> set. Используется для JSON-совместимой сериализации
++    конфигурации (StrategyConfig.as_dict) — семантика значений
++    сохраняется точно.
++    """
++    if isinstance(value, ImmutableMapping):
++        return {key: unfreeze(item) for key, item in value.items()}
++    if isinstance(value, ImmutableList):
++        return [unfreeze(item) for item in value]
++    if isinstance(value, frozenset):
++        return {unfreeze(item) for item in value}
++    return value
++
++
+ # ---------------------------------------------------------------------------
+ # Стабильный config_hash
+ # ---------------------------------------------------------------------------
+@@ -314,6 +514,16 @@ class StrategyConfig:
+ 
+     strategy_id + config_hash однозначно идентифицируют, какая стратегия
+     и какая версия конфигурации породила объект (атрибуция, attribution.py).
++
++    Глубокая неизменяемость (Stage A.1, исправление замечания №1 аудита):
++      * frozen=True защищает атрибуты верхнего уровня: strategy_id,
++        strategy_version, config_hash, origin, params, metadata;
++      * params и metadata — ImmutableMapping с глубокой защитой: вложенные
++        отображения/списки/множества хранятся в неизменяемых структурах;
++      * исходные словари копируются при создании: изменение источника
++        после создания конфигурации НЕ меняет её содержимое;
++      * config_hash соответствует ФАКТИЧЕСКИ сохранённым параметрам —
++        проверяется методом recompute_config_hash().
+     """
+     strategy_id: str
+     strategy_version: str
+@@ -322,6 +532,30 @@ class StrategyConfig:
+     origin: str = "engine"            # "engine" | "regression_harness"
+     metadata: Mapping[str, Any] = field(default_factory=dict)
+ 
++    def __post_init__(self) -> None:
++        # 1. Валидация идентификационных полей (fail-closed, без умолчаний)
++        for field_name in ("strategy_id", "strategy_version",
++                           "config_hash", "origin"):
++            value = getattr(self, field_name)
++            if not isinstance(value, str) or not value:
++                raise StrategyConfigError(
++                    f"StrategyConfig.{field_name} должен быть непустой "
++                    "строкой")
++        if not isinstance(self.params, Mapping):
++            raise StrategyConfigError(
++                "StrategyConfig.params должен быть отображением (Mapping), "
++                f"получено {type(self.params).__name__}")
++        if not isinstance(self.metadata, Mapping):
++            raise StrategyConfigError(
++                "StrategyConfig.metadata должен быть отображением "
++                f"(Mapping), получено {type(self.metadata).__name__}")
++        # 2. Глубокая заморозка + глубокая копия (замечание №1 аудита):
++        #    источники НЕ сохраняются; изменение исходных словарей после
++        #    создания конфигурации не влияет на её содержимое.
++        object.__setattr__(self, "params", ImmutableMapping(self.params))
++        object.__setattr__(self, "metadata",
++                           ImmutableMapping(self.metadata))
++
+     def attribution_dict(self) -> dict:
+         """Пара атрибуции (strategy_id, config_hash) для новых объектов."""
+         return {
+@@ -329,6 +563,38 @@ class StrategyConfig:
+             "config_hash": self.config_hash,
+         }
+ 
++    def recompute_config_hash(self) -> str:
++        """config_hash, вычисленный по ФАКТИЧЕСКИ сохранённым параметрам.
++
++        Расхождение с полем config_hash означает, что объект создан с
++        некорректной идентификацией (обнаруживается тестами Stage A.1);
++        для конфигураций, построенных через Strategy.get_config /
++        build_regression_config, значения совпадают всегда.
++        """
++        return compute_config_hash(self.strategy_id, self.strategy_version,
++                                   self.params)
++
++    def as_dict(self) -> dict:
++        """Глубокая МОДИФИЦИРУЕМАЯ, JSON-СОВМЕСТИМАЯ копия конфигурации.
++
++        Совместимость с JSON-сериализацией (Stage A.1): результат — обычные
++        dict/list с теми же значениями; множества представляются
++        ОТСОРТИРОВАННЫМИ списками — та же нормализация, что и в расчёте
++        config_hash (_normalize_for_json), поэтому JSON round-trip
++        (as_dict -> json.dumps -> json.loads -> новая StrategyConfig)
++        сохраняет и семантику значений, и config_hash.
++        Точная (нежелезно-JSON'ная) модифицируемая копия params/metadata —
++        через config.params.to_mutable() / config.metadata.to_mutable().
++        """
++        return {
++            "strategy_id": self.strategy_id,
++            "strategy_version": self.strategy_version,
++            "params": _normalize_for_json(self.params.to_mutable()),
++            "config_hash": self.config_hash,
++            "origin": self.origin,
++            "metadata": _normalize_for_json(self.metadata.to_mutable()),
++        }
++
+ 
+ # ---------------------------------------------------------------------------
+ # Входной сигнал (контракт входа; выход — Этап C, здесь НЕ реализуется)
+@@ -350,6 +616,19 @@ class EntrySignalInput:
+     drop_incomplete: bool = False
+     extra: Mapping[str, Any] = field(default_factory=dict)
+ 
++    def __post_init__(self) -> None:
++        # Глубокая неизменяемость (та же природа замечания №1 аудита):
++        # extra копируется и замораживается; None -> пустое отображение
++        # (совместимо с прежним поведением, при котором None не читался).
++        if self.extra is None:
++            object.__setattr__(self, "extra", ImmutableMapping())
++        else:
++            if not isinstance(self.extra, Mapping):
++                raise StrategyConfigError(
++                    "EntrySignalInput.extra должен быть отображением "
++                    f"(Mapping), получено {type(self.extra).__name__}")
++            object.__setattr__(self, "extra", ImmutableMapping(self.extra))
++
+ 
+ @dataclass(frozen=True)
+ class Signal:
+@@ -368,6 +647,20 @@ class Signal:
+     decided_at: Optional[str] = None
+     metadata: Mapping[str, Any] = field(default_factory=dict)
+ 
++    def __post_init__(self) -> None:
++        # Глубокая неизменяемость (та же природа замечания №1 аудита):
++        # metadata копируется и замораживается; None -> пустое отображение
++        # (совместимо с прежним поведением, при котором None не читался).
++        if self.metadata is None:
++            object.__setattr__(self, "metadata", ImmutableMapping())
++        else:
++            if not isinstance(self.metadata, Mapping):
++                raise StrategyConfigError(
++                    "Signal.metadata должен быть отображением (Mapping), "
++                    f"получено {type(self.metadata).__name__}")
++            object.__setattr__(self, "metadata",
++                               ImmutableMapping(self.metadata))
++
+ 
+ # ---------------------------------------------------------------------------
+ # Абстрактный контракт стратегии
+diff --git a/stage_a1/candidate/tests/test_stage_a1_attribution_explicit.py b/stage_a1/candidate/tests/test_stage_a1_attribution_explicit.py
+new file mode 100644
+index 0000000..d4a51c5
+--- /dev/null
++++ b/stage_a1/candidate/tests/test_stage_a1_attribution_explicit.py
+@@ -0,0 +1,584 @@
++# tests/test_stage_a1_attribution_explicit.py
++# STAGE A.1 CORRECTIVE TESTS — ЗАМЕЧАНИЯ №2 и №3 НЕЗАВИСИМОГО АУДИТА:
++#
++# №2 — «атрибуция ещё не встроена в производственный поток»: реализован и
++#   протестирован САМОСТОЯТЕЛЬНЫЙ интерфейс атрибуции нового движка
++#   (AttributionFactory: new_event / new_virtual_order / new_virtual_position /
++#   append_csv_row / append_jsonl_row) с ЯВНОЙ передачей контекста; старые
++#   production-механизмы Samsung V4 НЕ изменяются; исторические объекты
++#   читаются без миграции и без выдуманной атрибуции.
++#
++# №3 — «убрать глобальный контекст атрибуции»: глобального изменяемого
++#   состояния больше НЕ существует (set_current_context/get_current_context/
++#   clear_current_context/_current_context удалены); единственный источник
++#   атрибуции — ЯВНО переданный AttributionContext (или StrategyConfig).
++#
++# Обязательные проверки замечания №3 (по заданию Stage A.1):
++#   1. две стратегии с разными strategy_id и config_hash;
++#   2. одновременное создание объектов обеих стратегий;
++#   3. объекты получают только собственную атрибуцию;
++#   4. отсутствие перекрёстного загрязнения;
++#   5. отсутствие контекста приводит к явной ошибке;
++#   6. вложенные вызовы не меняют контекст вызывающего кода;
++#   7. исключение при создании объекта не оставляет устаревший контекст;
++#   8. повторный запуск тестов не зависит от порядка предыдущих тестов.
++#
++# Offline; без сети, брокера и заявок. Файлы создаются только в tmp_path.
++
++import csv
++import json
++import os
++import threading
++
++import pytest
++
++import attribution as at
++from attribution import (
++    ATTRIBUTION_FIELDS,
++    AttributionContext,
++    AttributionError,
++    AttributionFactory,
++    AttributionRequiredError,
++    append_attributed_csv_row,
++    append_attributed_jsonl_row,
++    legacy_attribution_view,
++    read_csv_attribution_report,
++    read_jsonl_attribution_report,
++    record_has_attribution,
++    stamp,
++)
++from strategy_api import (
++    ParamSpec,
++    ParamType,
++    Strategy,
++    StrategyConfig,
++    compute_config_hash,
++)
++
++
++# ---------------------------------------------------------------------------
++# Две явные конфигурации двух разных стратегий (требование №1)
++# ---------------------------------------------------------------------------
++
++class _StrategyAlpha(Strategy):
++    strategy_id = "alpha_engine"
++    strategy_version = "1.0"
++
++    def param_specs(self):
++        return (ParamSpec("p_int", ParamType.INT, minimum=1),)
++
++    def evaluate_entry(self, signal_input, config):
++        raise NotImplementedError
++
++
++class _StrategyBeta(Strategy):
++    strategy_id = "beta_engine"
++    strategy_version = "2.0"
++
++    def param_specs(self):
++        return (ParamSpec("p_int", ParamType.INT, minimum=1),)
++
++    def evaluate_entry(self, signal_input, config):
++        raise NotImplementedError
++
++
++def _config_for(cls, p_int: int) -> StrategyConfig:
++    return cls().get_config({"p_int": p_int})
++
++
++@pytest.fixture
++def context_alpha():
++    return AttributionContext.from_config(_config_for(_StrategyAlpha, 1))
++
++
++@pytest.fixture
++def context_beta():
++    return AttributionContext.from_config(_config_for(_StrategyBeta, 2))
++
++
++@pytest.fixture
++def legacy_trade_fields():
++    # историческая схема торгового CSV из production logger.py (только чтение)
++    import logger
++    return list(logger.TRADE_FIELDS)
++
++
++# ---------------------------------------------------------------------------
++# Требование №3.5: отсутствие контекста — явная ошибка; глобального
++# состояния не существует
++# ---------------------------------------------------------------------------
++
++class TestNoGlobalContext:
++    def test_global_context_api_removed(self):
++        # глобальное изменяемое состояние удалено как обязательный источник
++        for name in ("set_current_context", "get_current_context",
++                     "clear_current_context", "_current_context"):
++            assert not hasattr(at, name), \
++                f"глобальное состояние атрибуции {name!r} не должно существовать"
++
++    def test_missing_context_raises_explicit_error(self):
++        # явно переданный None -> AttributionRequiredError
++        with pytest.raises(AttributionRequiredError) as exc:
++            stamp({"x": 1}, None)
++        message = str(exc.value)
++        assert "контекст" in message
++        assert "фиктивные значения запрещены" in message
++        # отсутствующий аргумент -> TypeError (fail-closed до входа)
++        with pytest.raises(TypeError):
++            stamp({"x": 1})
++
++    def test_missing_context_factory_creation_raises(self):
++        with pytest.raises(AttributionRequiredError):
++            AttributionFactory(None)
++        with pytest.raises(AttributionRequiredError):
++            AttributionFactory("not-a-context")
++
++    def test_no_fabricated_placeholders_ever(self, context_alpha):
++        # в атрибуции НОВЫХ объектов нет UNKNOWN/пустых/случайных значений
++        stamped = stamp({"x": 1}, context_alpha)
++        for name in ATTRIBUTION_FIELDS:
++            value = stamped[name]
++            assert isinstance(value, str) and value
++            assert value == getattr(context_alpha, name)
++            assert value.upper() != "UNKNOWN"
++        # и у СТАРЫХ записей отсутствующая атрибуция остаётся явным None,
++        # а не заглушкой
++        view = legacy_attribution_view({"trade_id": "T"})
++        assert view["strategy_id"] is None
++        assert view["config_hash"] is None
++        assert view["has_attribution"] is False
++
++
++# ---------------------------------------------------------------------------
++# Единый явный механизм: AttributionContext или StrategyConfig (замечание №2)
++# ---------------------------------------------------------------------------
++
++class TestUnifiedExplicitMechanism:
++    def test_from_config_builds_correct_context(self):
++        config = _config_for(_StrategyAlpha, 1)
++        context = AttributionContext.from_config(config)
++        assert context.strategy_id == "alpha_engine"
++        assert context.config_hash == config.config_hash
++        assert context.as_dict() == config.attribution_dict()
++
++    def test_from_config_rejects_none_and_garbage(self):
++        with pytest.raises(AttributionError):
++            AttributionContext.from_config(None)
++        with pytest.raises(AttributionError):
++            AttributionContext.from_config(object())
++        from types import SimpleNamespace
++        # объект без валидных полей атрибуции (утка без данных)
++        with pytest.raises(AttributionError):
++            AttributionContext.from_config(
++                SimpleNamespace(strategy_id="", config_hash=""))
++        with pytest.raises(AttributionError):
++            AttributionContext.from_config(
++                SimpleNamespace(strategy_id="s", config_hash=None))
++
++    def test_stamp_accepts_strategy_config_directly(self):
++        config = _config_for(_StrategyBeta, 2)
++        stamped = stamp({"event": "SIGNAL"}, config)
++        assert stamped["strategy_id"] == "beta_engine"
++        assert stamped["config_hash"] == config.config_hash
++
++    def test_factory_accepts_strategy_config_directly(self):
++        config = _config_for(_StrategyAlpha, 1)
++        factory = AttributionFactory(config)
++        assert factory.context.strategy_id == "alpha_engine"
++        assert factory.context.config_hash == config.config_hash
++
++    def test_context_is_immutable(self, context_alpha):
++        with pytest.raises(Exception):
++            context_alpha.strategy_id = "hacked"
++        # данные конфигурации и контекста совпадают и не расходятся
++        config = _config_for(_StrategyAlpha, 1)
++        assert AttributionContext.from_config(config).as_dict() == \
++            config.attribution_dict()
++
++
++# ---------------------------------------------------------------------------
++# Требования №3.1–3.4: две стратегии, одновременное создание, только
++# собственная атрибуция, отсутствие перекрёстного загрязнения
++# ---------------------------------------------------------------------------
++
++class TestTwoStrategiesIsolation:
++    def test_two_strategies_have_different_ids_and_hashes(self):
++        config_a = _config_for(_StrategyAlpha, 1)
++        config_b = _config_for(_StrategyBeta, 2)
++        assert config_a.strategy_id != config_b.strategy_id
++        assert config_a.config_hash != config_b.config_hash
++        assert AttributionContext.from_config(config_a) != \
++            AttributionContext.from_config(config_b)
++
++    def test_interleaved_creation_keeps_own_attribution(self,
++                                                        context_alpha,
++                                                        context_beta):
++        # одновременное (чередующееся) создание объектов обеих стратегий
++        factory_a = AttributionFactory(context_alpha)
++        factory_b = AttributionFactory(context_beta)
++        e1 = factory_a.new_event({"seq": 1})
++        e2 = factory_b.new_event({"seq": 2})
++        e3 = factory_a.new_event({"seq": 3})
++        e4 = factory_b.new_event({"seq": 4})
++        assert (e1["strategy_id"], e3["strategy_id"]) == \
++            ("alpha_engine", "alpha_engine")
++        assert (e2["strategy_id"], e4["strategy_id"]) == \
++            ("beta_engine", "beta_engine")
++        assert e1["config_hash"] == e3["config_hash"] == \
++            context_alpha.config_hash
++        assert e2["config_hash"] == e4["config_hash"] == \
++            context_beta.config_hash
++        assert e1["config_hash"] != e2["config_hash"]
++
++    def test_same_record_stamped_by_both_strategies_no_cross_leak(self,
++                                                                 context_alpha,
++                                                                 context_beta):
++        record = {"event": "SHARED"}
++        from_a = stamp(record, context_alpha)
++        from_b = stamp(record, context_beta)
++        assert from_a["strategy_id"] == "alpha_engine"
++        assert from_b["strategy_id"] == "beta_engine"
++        # исходная запись не мутировалась и не получила атрибуцию
++        assert record == {"event": "SHARED"}
++        assert not record_has_attribution(record)
++
++    def test_concurrent_threads_no_cross_contamination(self,
++                                                       context_alpha,
++                                                       context_beta):
++        # параллельная работа: каждая стратегия создаёт объекты в своём
++        # потоке; перекрёстного загрязнения нет
++        factory_a = AttributionFactory(context_alpha)
++        factory_b = AttributionFactory(context_beta)
++        results = {"alpha": [], "beta": []}
++        errors = []
++
++        def produce(factory, key, count):
++            try:
++                for i in range(count):
++                    obj = factory.new_event({"thread": key, "i": i})
++                    results[key].append(obj)
++            except Exception as exc:  # noqa: BLE001
++                errors.append(exc)
++
++        threads = [
++            threading.Thread(target=produce,
++                             args=(factory_a, "alpha", 50)),
++            threading.Thread(target=produce,
++                             args=(factory_b, "beta", 50)),
++            threading.Thread(target=produce,
++                             args=(factory_a, "alpha", 50)),
++            threading.Thread(target=produce,
++                             args=(factory_b, "beta", 50)),
++        ]
++        for thread in threads:
++            thread.start()
++        for thread in threads:
++            thread.join()
++        assert errors == []
++        assert len(results["alpha"]) == 100
++        assert len(results["beta"]) == 100
++        for obj in results["alpha"]:
++            assert obj["strategy_id"] == "alpha_engine"
++            assert obj["config_hash"] == context_alpha.config_hash
++        for obj in results["beta"]:
++            assert obj["strategy_id"] == "beta_engine"
++            assert obj["config_hash"] == context_beta.config_hash
++
++    def test_context_of_calling_code_not_changed_by_nested_calls(self,
++                                                                context_alpha,
++                                                                context_beta):
++        # требование №3.6: вложенные вызовы не меняют контекст вызывающего
++        # кода — с явным DI контекст ХРАНИТСЯ В ЛОКАЛЬНОЙ ПЕРЕМЕННОЙ
++        # вызывающего кода и не может быть подменён извне
++        factory_a = AttributionFactory(context_alpha)
++
++        def nested_work_deep_with_other_strategy(context_beta):
++            factory_b = AttributionFactory(context_beta)
++            return factory_b.new_event({"who": "beta"})
++
++        outer_before = factory_a.context
++        nested_result = nested_work_deep_with_other_strategy(context_beta)
++        assert nested_result["strategy_id"] == "beta_engine"
++        # контекст вызывающего кода не изменился
++        assert factory_a.context is outer_before
++        assert factory_a.context.strategy_id == "alpha_engine"
++        # следующий объект вызывающего кода по-прежнему alpha
++        assert factory_a.new_event({"who": "alpha"})["strategy_id"] == \
++            "alpha_engine"
++
++    def test_exception_does_not_leave_stale_context(self,
++                                                    context_alpha,
++                                                    context_beta):
++        # требование №3.7: исключение при создании объекта не оставляет
++        # «устаревший» контекст — контекст фабрики неизменяем по построению
++        factory_a = AttributionFactory(context_alpha)
++        conflicting = {"strategy_id": "beta_engine",
++                       "config_hash": "c" * 64}
++        with pytest.raises(AttributionError):
++            factory_a.stamp(conflicting)
++        # фабрика продолжила работу со СВОИМ контекстом
++        assert factory_a.context == context_alpha
++        following = factory_a.stamp({"x": 1})
++        assert following["strategy_id"] == "alpha_engine"
++        assert following["config_hash"] == context_alpha.config_hash
++
++    def test_repeated_runs_order_independent(self, context_alpha,
++                                             context_beta):
++        # требование №3.8: повторный запуск не зависит от порядка
++        # предыдущих тестов — один и тот же сценарий в двух порядках даёт
++        # байт-идентичные результаты
++        def scenario(order):
++            factory_a = AttributionFactory(context_alpha)
++            factory_b = AttributionFactory(context_beta)
++            events = []
++            for kind in order:
++                if kind == "alpha":
++                    events.append(factory_a.new_event({"step": kind}))
++                else:
++                    events.append(factory_b.new_event({"step": kind}))
++            return [dict(e) for e in events]
++
++        forward = scenario(["alpha", "beta", "alpha", "beta"])
++        backward = scenario(["beta", "alpha", "beta", "alpha"])
++        # у каждой стратегии свои неизменные значения атрибуции
++        forward_alpha = [e for e in forward if e["step"] == "alpha"]
++        backward_alpha = [e for e in backward if e["step"] == "alpha"]
++        assert forward_alpha == backward_alpha
++        forward_beta = [e for e in forward if e["step"] == "beta"]
++        backward_beta = [e for e in backward if e["step"] == "beta"]
++        assert forward_beta == backward_beta
++        assert {e["strategy_id"] for e in forward_alpha} == {"alpha_engine"}
++        assert {e["strategy_id"] for e in forward_beta} == {"beta_engine"}
++
++
++# ---------------------------------------------------------------------------
++# Замечание №2: интерфейсы атрибуции всех типов НОВЫХ объектов движка
++# ---------------------------------------------------------------------------
++
++class TestNewEngineObjectAttribution:
++    def test_new_event_carries_attribution(self, context_alpha):
++        factory = AttributionFactory(context_alpha)
++        event = factory.new_event(
++            {"event_id": "E1", "timestamp_utc": "2026-01-01T00:00:00Z",
++             "figi": "BBG000000001", "kind": "SIGNAL"})
++        assert record_has_attribution(event)
++        assert event["strategy_id"] == "alpha_engine"
++        assert event["config_hash"] == context_alpha.config_hash
++        # JSONL-совместимость payload
++        restored = json.loads(json.dumps(event, ensure_ascii=False))
++        assert restored["strategy_id"] == "alpha_engine"
++
++    def test_new_virtual_order_carries_attribution(self, context_alpha):
++        factory = AttributionFactory(context_alpha)
++        order = factory.new_virtual_order(
++            {"order_id": "V1", "figi": "BBG000000001", "side": "BUY",
++             "lots": 1, "status": "VIRTUAL_RESEARCH"})
++        assert order["strategy_id"] == "alpha_engine"
++        assert order["config_hash"] == context_alpha.config_hash
++
++    def test_new_virtual_position_carries_attribution(self, context_alpha):
++        factory = AttributionFactory(context_alpha)
++        position = factory.new_virtual_position(
++            {"position_id": "P1", "figi": "BBG000000001",
++             "state": "OPEN_RESEARCH"})
++        assert position["strategy_id"] == "alpha_engine"
++        assert position["config_hash"] == context_alpha.config_hash
++
++    def test_factory_rejects_non_mapping_records(self, context_alpha):
++        factory = AttributionFactory(context_alpha)
++        with pytest.raises(AttributionError):
++            factory.new_event(["not", "a", "mapping"])
++        with pytest.raises(AttributionError):
++            factory.new_virtual_order("order")
++        with pytest.raises(AttributionError):
++            factory.new_virtual_position(42)
++
++    def test_conflicting_fields_object_not_created(self, context_alpha):
++        factory = AttributionFactory(context_alpha)
++        bad = {"strategy_id": "beta_engine", "x": 1}
++        with pytest.raises(AttributionError):
++            factory.new_event(bad)
++        with pytest.raises(AttributionError):
++            factory.new_virtual_order(bad)
++        with pytest.raises(AttributionError):
++            factory.new_virtual_position(bad)
++
++    def test_conflicting_csv_row_not_created_file_untouched(
++            self, tmp_path, context_alpha):
++        factory = AttributionFactory(context_alpha)
++        path = str(tmp_path / "engine_research.csv")
++        factory.append_csv_row(
++            path, {"event_id": "E1"}, ["event_id", "timestamp_utc"])
++        before = open(path, "rb").read()
++        with pytest.raises(AttributionError):
++            factory.append_csv_row(
++                path, {"event_id": "E2", "strategy_id": "beta_engine"},
++                ["event_id", "timestamp_utc"])
++        # конфликтная строка НЕ записана, файл не изменён
++        assert open(path, "rb").read() == before
++
++
++# ---------------------------------------------------------------------------
++# Замечание №2: новые журналы CSV/JSONL движка
++# ---------------------------------------------------------------------------
++
++class TestNewEngineJournals:
++    CSV_BASE = ["event_id", "timestamp_utc", "figi", "kind"]
++
++    def test_csv_row_appended_with_attribution(self, tmp_path,
++                                               context_alpha):
++        factory = AttributionFactory(context_alpha)
++        path = str(tmp_path / "engine_research.csv")
++        written = factory.append_csv_row(
++            path,
++            {"event_id": "E1", "timestamp_utc": "2026-01-01T00:00:00Z",
++             "figi": "F", "kind": "SIGNAL"},
++            self.CSV_BASE)
++        assert written["strategy_id"] == "alpha_engine"
++        rows = read_csv_attribution_report(path)
++        assert len(rows) == 1
++        assert rows[0]["has_attribution"] is True
++        assert rows[0]["strategy_id"] == "alpha_engine"
++
++    def test_jsonl_row_appended_with_attribution(self, tmp_path,
++                                                 context_alpha):
++        factory = AttributionFactory(context_alpha)
++        path = str(tmp_path / "engine_events.jsonl")
++        written = factory.append_jsonl_row(
++            path, {"event_id": "E1", "kind": "SIGNAL"})
++        assert written["strategy_id"] == "alpha_engine"
++        with open(path, "r", encoding="utf-8") as handle:
++            lines = [line for line in handle if line.strip()]
++        assert len(lines) == 1
++        restored = json.loads(lines[0])
++        assert restored["strategy_id"] == "alpha_engine"
++        assert restored["config_hash"] == context_alpha.config_hash
++
++    def test_jsonl_multiple_rows_keep_own_attribution(self, tmp_path,
++                                                      context_alpha,
++                                                      context_beta):
++        path = str(tmp_path / "engine_events.jsonl")
++        append_attributed_jsonl_row(
++            path, {"event_id": "A1"}, context=context_alpha)
++        append_attributed_jsonl_row(
++            path, {"event_id": "B1"}, context=context_beta)
++        append_attributed_jsonl_row(
++            path, {"event_id": "A2"}, context=context_alpha)
++        report = read_jsonl_attribution_report(path)
++        assert [v["strategy_id"] for v in report] == \
++            ["alpha_engine", "beta_engine", "alpha_engine"]
++        assert report[0]["config_hash"] == context_alpha.config_hash
++        assert report[1]["config_hash"] == context_beta.config_hash
++
++    def test_jsonl_without_context_fails_closed(self, tmp_path):
++        path = str(tmp_path / "engine_events.jsonl")
++        with pytest.raises(AttributionRequiredError):
++            append_attributed_jsonl_row(
++                path, {"event_id": "X"}, context=None)
++        with pytest.raises(TypeError):
++            append_attributed_jsonl_row(path, {"event_id": "X"})
++        assert not os.path.isfile(path)
++
++    def test_module_level_csv_writer_still_explicit(self, tmp_path,
++                                                    context_alpha):
++        path = str(tmp_path / "engine_research.csv")
++        written = append_attributed_csv_row(
++            path, {"event_id": "E1"}, self.CSV_BASE, context=context_alpha)
++        assert written["strategy_id"] == "alpha_engine"
++
++
++# ---------------------------------------------------------------------------
++# Замечание №2: старые объекты остаются совместимыми; миграции НЕТ;
++# чтение старой записи не добавляет ей атрибуцию
++# ---------------------------------------------------------------------------
++
++class TestLegacyObjectsUnchanged:
++    def test_old_jsonl_read_safely_and_file_unchanged(self, tmp_path):
++        old_jsonl = tmp_path / "research_events.jsonl"
++        lines = [
++            {"event_id": "E1", "timestamp_utc": "2025-01-01T10:00:00Z",
++             "event": "SIGNAL", "figi": "BBG000000001"},
++            {"event_id": "E2", "timestamp_utc": "2025-01-01T10:05:00Z",
++             "event": "HOLD", "figi": "BBG000000002"},
++        ]
++        with open(old_jsonl, "w", encoding="utf-8") as handle:
++            for line in lines:
++                handle.write(json.dumps(line, ensure_ascii=False) + "\n")
++        before = old_jsonl.read_bytes()
++
++        report = read_jsonl_attribution_report(str(old_jsonl))
++        assert len(report) == 2
++        for view in report:
++            assert view["has_attribution"] is False
++            assert view["strategy_id"] is None
++            assert view["config_hash"] is None
++        # исторический файл НЕ переписан, атрибуция НЕ добавлена, миграции НЕТ
++        assert old_jsonl.read_bytes() == before
++
++    def test_old_csv_read_safely_and_file_unchanged(self, tmp_path,
++                                                    legacy_trade_fields):
++        old_csv = tmp_path / "research_trades.csv"
++        with open(old_csv, "w", encoding="utf-8", newline="") as handle:
++            writer = csv.DictWriter(handle, fieldnames=legacy_trade_fields,
++                                    delimiter=";")
++            writer.writeheader()
++            writer.writerow({"trade_id": "T1", "ticker": "SBER",
++                             "side": "BUY"})
++        before = old_csv.read_bytes()
++        report = read_csv_attribution_report(str(old_csv))
++        assert report[0]["has_attribution"] is False
++        assert report[0]["strategy_id"] is None
++        assert old_csv.read_bytes() == before
++
++    def test_mixed_journal_reads_correctly(self, tmp_path, context_alpha):
++        # журнал, в котором есть и старые записи (без атрибуции), и новые
++        # (с явной атрибутностью): чтение не «дописывает» старым
++        path = str(tmp_path / "mixed_events.jsonl")
++        with open(path, "w", encoding="utf-8") as handle:
++            handle.write(json.dumps({"event_id": "OLD1"}) + "\n")
++        append_attributed_jsonl_row(
++            path, {"event_id": "NEW1"}, context=context_alpha)
++        report = read_jsonl_attribution_report(path)
++        assert report[0]["has_attribution"] is False
++        assert report[0]["strategy_id"] is None
++        assert report[1]["has_attribution"] is True
++        assert report[1]["strategy_id"] == "alpha_engine"
++        # первая строка файла по-прежнему без атрибуции (не переписана)
++        with open(path, "r", encoding="utf-8") as handle:
++            first = json.loads(handle.readline())
++        assert first == {"event_id": "OLD1"}
++
++
++# ---------------------------------------------------------------------------
++# Старая production-схема logger.py не изменена (граница Stage A)
++# ---------------------------------------------------------------------------
++
++class TestStageABoundaryUnchanged:
++    def test_trade_fields_have_no_attribution_columns_yet(self):
++        import logger
++        assert "strategy_id" not in logger.TRADE_FIELDS
++        assert "config_hash" not in logger.TRADE_FIELDS
++        assert at.TRADE_ATTRIBUTION_FIELDS == ("strategy_id", "config_hash")
++
++    def test_events_file_name_unchanged(self):
++        # имена исторических журналов в ИСХОДНОМ КОДЕ logger.py не изменены
++        # (runtime-значение может быть monkeypatched в conftest для изоляции)
++        import pathlib
++        candidate_root = pathlib.Path(__file__).resolve().parent.parent
++        source = (candidate_root / "logger.py").read_text(encoding="utf-8")
++        assert 'EVENTS_FILE = "research_events.jsonl"' in source
++        assert 'TRADES_FILE = "research_trades.csv"' in source
++
++    def test_attribution_module_does_not_touch_production_flow(self):
++        # атрибуция нового движка — самостоятельный интерфейс: она не
++        # вызывается из production-потока baseline (main/execution/logger
++        # не импортируют attribution)
++        import io
++        import pathlib
++        candidate_root = pathlib.Path(__file__).resolve().parent.parent
++        for name in ("main.py", "execution.py", "logger.py",
++                     "order_ledger.py", "strategy.py", "config.py"):
++            text = (candidate_root / name).read_text(encoding="utf-8")
++            assert "attribution" not in text.replace(
++                "attribution.py", ""), \
++                f"{name} не должен зависеть от атрибуции нового движка"
+diff --git a/stage_a1/candidate/tests/test_stage_a1_config_immutability.py b/stage_a1/candidate/tests/test_stage_a1_config_immutability.py
+new file mode 100644
+index 0000000..7eb4acd
+--- /dev/null
++++ b/stage_a1/candidate/tests/test_stage_a1_config_immutability.py
+@@ -0,0 +1,568 @@
++# tests/test_stage_a1_config_immutability.py
++# STAGE A.1 CORRECTIVE TESTS — ЗАМЕЧАНИЕ №1 НЕЗАВИСИМОГО АУДИТА:
++# «StrategyConfig действительно immutable, включая вложенные структуры».
++#
++# Обязательные проверки (по заданию Stage A.1):
++#   1. попытка изменить верхнеуровневый params;
++#   2. попытка изменить вложенный словарь;
++#   3. попытка изменить вложенный список;
++#   4. попытка изменить metadata;
++#   5. изменение исходного словаря после создания StrategyConfig;
++#   6. попытка изменить config_hash;
++#   7. одинаковая конфигурация после сериализации даёт одинаковый hash;
++#   8. изменение значимого параметра создаёт новый hash;
++#   9. round-trip сериализация не меняет семантику параметров.
++#
++# Плюс: защита внутреннего хранилища, hash-совместимость, deepcopy,
++# консистентность config_hash с фактически сохранёнными параметрами,
++# совместимость с существующими потребителями (Strategy.get_config,
++# engine_config, legacy adapter).
++#
++# Тесты проверяют РЕАЛЬНОЕ поведение, а не только наличие frozen=True.
++# Offline; без сети, брокера и заявок.
++
++import copy
++import json
++
++import pytest
++from dataclasses import FrozenInstanceError
++
++import strategy_api
++from strategy_api import (
++    ImmutableMapping,
++    ImmutableList,
++    ParamSpec,
++    ParamType,
++    Strategy,
++    StrategyConfig,
++    StrategyConfigError,
++    compute_config_hash,
++)
++
++
++# ---------------------------------------------------------------------------
++# Фикстуры
++# ---------------------------------------------------------------------------
++
++_SPECS = (
++    ParamSpec("int_p", ParamType.INT, minimum=1),
++    ParamSpec("num_p", ParamType.FLOAT, minimum=0.0),
++)
++
++
++class _DummyStrategy(Strategy):
++    strategy_id = "immutability_dummy"
++    strategy_version = "1.0"
++
++    def param_specs(self):
++        return _SPECS
++
++    def evaluate_entry(self, signal_input, config):
++        return strategy_api.Signal(
++            strategy_id=self.strategy_id,
++            config_hash=config.config_hash,
++            direction=strategy_api.SignalDirection.HOLD,
++            reason="dummy",
++        )
++
++
++def _make_config(params=None, metadata=None) -> StrategyConfig:
++    strategy = _DummyStrategy()
++    base = {"int_p": 5, "num_p": 2.5}
++    if params is not None:
++        base = params
++    config = strategy.get_config(base)
++    if metadata is not None:
++        # пересборка с metadata через прямой конструктор (валидные поля)
++        return StrategyConfig(
++            strategy_id=config.strategy_id,
++            strategy_version=config.strategy_version,
++            params=config.params,
++            config_hash=config.config_hash,
++            origin=config.origin,
++            metadata=metadata,
++        )
++    return config
++
++
++def _direct_config(params, metadata=None) -> StrategyConfig:
++    """Конфигурация с произвольными (в т.ч. несхемными) ключами.
++
++    Мини-стратегия валидирует ТОЛЬКО int_p/num_p, поэтому ключи вне схемы
++    (например, 'extra') вводятся прямым конструктором — как и делает
++    Strategy.get_config после нормализации параметров.
++    """
++    params = dict(params)
++    return StrategyConfig(
++        strategy_id=_DummyStrategy.strategy_id,
++        strategy_version=_DummyStrategy.strategy_version,
++        params=params,
++        config_hash=compute_config_hash(
++            _DummyStrategy.strategy_id,
++            _DummyStrategy.strategy_version, params),
++        origin="engine",
++        metadata=dict(metadata or {}),
++    )
++
++
++def _nested_config() -> StrategyConfig:
++    """Конфигурация с вложенными словарями, списками и множествами."""
++    return StrategyConfig(
++        strategy_id="nested_demo",
++        strategy_version="1.0",
++        params={
++            "rsi": {"thresholds": {"upper": 70, "lower": 30}},
++            "ma_window": [5, 13, [21, 34]],
++            "levels": {1.0, 2.0},
++        },
++        config_hash="e" * 64,
++    )
++
++
++# ---------------------------------------------------------------------------
++# Требование 1: попытка изменить верхнеуровневый params
++# ---------------------------------------------------------------------------
++
++class TestTopLevelImmutability:
++    def test_params_field_assignment_blocked(self):
++        config = _make_config()
++        with pytest.raises(FrozenInstanceError):
++            config.params = {"int_p": 99, "num_p": 1.0}
++
++    def test_params_item_assignment_blocked(self):
++        config = _make_config()
++        with pytest.raises(TypeError):
++            config.params["int_p"] = 99
++
++    def test_params_item_deletion_blocked(self):
++        config = _make_config()
++        with pytest.raises(TypeError):
++            del config.params["int_p"]
++
++    def test_params_is_immutable_mapping(self):
++        config = _make_config()
++        assert isinstance(config.params, ImmutableMapping)
++        # у типа не существует операций записи вообще (Mapping ABC:
++        # только чтение; setdefault/pop/update/__setitem__ отсутствуют)
++        assert not hasattr(config.params, "setdefault")
++        assert not hasattr(config.params, "pop")
++        assert not hasattr(config.params, "update")
++        assert not hasattr(type(config.params), "__setitem__")
++        assert not hasattr(type(config.params), "__delitem__")
++        # setattr на объекте отображения запрещён
++        with pytest.raises(TypeError):
++            config.params.__setattr__("_data", {})
++
++    def test_identity_fields_assignment_blocked(self):
++        config = _make_config()
++        with pytest.raises(FrozenInstanceError):
++            config.strategy_id = "other"
++        with pytest.raises(FrozenInstanceError):
++            config.strategy_version = "9.9"
++        with pytest.raises(FrozenInstanceError):
++            config.origin = "regression_harness"
++
++
++# ---------------------------------------------------------------------------
++# Требование 2: попытка изменить вложенный словарь
++# ---------------------------------------------------------------------------
++
++class TestNestedDictImmutability:
++    def test_nested_dict_item_assignment_blocked(self):
++        config = _nested_config()
++        with pytest.raises(TypeError):
++            config.params["rsi"]["thresholds"]["upper"] = 99
++
++    def test_deeply_nested_dict_item_assignment_blocked(self):
++        config = _nested_config()
++        with pytest.raises(TypeError):
++            config.params["rsi"]["thresholds"]["new_key"] = 1
++
++    def test_nested_dict_deletion_blocked(self):
++        config = _nested_config()
++        with pytest.raises(TypeError):
++            del config.params["rsi"]["thresholds"]["upper"]
++
++    def test_nested_dict_value_is_immutable_mapping(self):
++        config = _nested_config()
++        assert isinstance(config.params["rsi"], ImmutableMapping)
++        assert isinstance(config.params["rsi"]["thresholds"], ImmutableMapping)
++
++    def test_backing_store_write_blocked(self):
++        # даже запись через приватное хранилище отклоняется (MappingProxyType)
++        config = _nested_config()
++        with pytest.raises(TypeError):
++            config.params._data["injected"] = True
++        assert "injected" not in config.params
++
++
++# ---------------------------------------------------------------------------
++# Требование 3: попытка изменить вложенный список
++# ---------------------------------------------------------------------------
++
++class TestNestedListImmutability:
++    def test_nested_list_item_assignment_blocked(self):
++        config = _nested_config()
++        with pytest.raises(TypeError):
++            config.params["ma_window"][0] = 99
++
++    def test_nested_list_append_blocked(self):
++        config = _nested_config()
++        with pytest.raises(AttributeError):
++            config.params["ma_window"].append(55)
++
++    def test_inner_list_mutation_blocked(self):
++        config = _nested_config()
++        inner = config.params["ma_window"][2]
++        with pytest.raises(TypeError):
++            inner[0] = 99
++        with pytest.raises(AttributeError):
++            inner.append(55)
++
++    def test_nested_list_is_immutable_list(self):
++        config = _nested_config()
++        assert isinstance(config.params["ma_window"], ImmutableList)
++
++    def test_nested_set_is_frozenset(self):
++        config = _nested_config()
++        assert isinstance(config.params["levels"], frozenset)
++        with pytest.raises(AttributeError):
++            config.params["levels"].add(3.0)
++
++
++# ---------------------------------------------------------------------------
++# Требование 4: попытка изменить metadata
++# ---------------------------------------------------------------------------
++
++class TestMetadataImmutability:
++    def test_metadata_field_assignment_blocked(self):
++        config = _make_config(metadata={"profile": "SANDBOX_TEST"})
++        with pytest.raises(FrozenInstanceError):
++            config.metadata = {"profile": "OTHER"}
++
++    def test_metadata_item_assignment_blocked(self):
++        config = _make_config(metadata={"profile": "SANDBOX_TEST"})
++        with pytest.raises(TypeError):
++            config.metadata["profile"] = "OTHER"
++
++    def test_metadata_nested_dict_blocked(self):
++        config = _make_config(
++            metadata={"source": {"file": "params.json", "rows": [1, 2]}})
++        with pytest.raises(TypeError):
++            config.metadata["source"]["file"] = "hacked.json"
++        with pytest.raises(AttributeError):
++            config.metadata["source"]["rows"].append(3)
++
++    def test_metadata_non_mapping_rejected(self):
++        with pytest.raises(StrategyConfigError):
++            StrategyConfig(
++                strategy_id="s", strategy_version="v",
++                params={"a": 1}, config_hash="c" * 64, metadata="not-a-map")
++
++
++# ---------------------------------------------------------------------------
++# Требование 5: изменение исходного словаря после создания StrategyConfig
++# ---------------------------------------------------------------------------
++
++class TestSourceIsolation:
++    def test_source_dict_mutation_after_creation_isolated(self):
++        source = {"int_p": 5, "num_p": 2.5,
++                  "extra": {"nested": [1, 2, {"deep": "v"}]}}
++        config = _direct_config(source)
++        before_hash = config.config_hash
++        source["int_p"] = 999
++        source["extra"]["nested"][2]["deep"] = "hacked"
++        source["extra"]["nested"].append(4)
++        assert config.params["int_p"] == 5
++        assert config.params["extra"]["nested"][2]["deep"] == "v"
++        assert len(config.params["extra"]["nested"]) == 3
++        assert config.config_hash == before_hash
++
++    def test_source_metadata_mutation_after_creation_isolated(self):
++        source_meta = {"profile": "SANDBOX_TEST",
++                       "tags": ["a", "b"]}
++        config = _make_config(metadata=source_meta)
++        source_meta["profile"] = "HACKED"
++        source_meta["tags"].append("c")
++        assert config.metadata["profile"] == "SANDBOX_TEST"
++        assert list(config.metadata["tags"]) == ["a", "b"]
++
++    def test_recomputed_hash_reflects_stored_params_not_source(self):
++        source = {"int_p": 5, "num_p": 2.5}
++        config = _direct_config(source)
++        source["int_p"] = 7  # источник изменён ПОСЛЕ создания
++        # config_hash по-прежнему соответствует ФАКТИЧЕСКИ сохранённым
++        # параметрам, а не изменённому источнику
++        assert config.recompute_config_hash() == config.config_hash
++
++
++# ---------------------------------------------------------------------------
++# Требование 6: попытка изменить config_hash
++# ---------------------------------------------------------------------------
++
++class TestConfigHashImmutability:
++    def test_config_hash_assignment_blocked(self):
++        config = _make_config()
++        with pytest.raises(FrozenInstanceError):
++            config.config_hash = "f" * 64
++
++    def test_config_hash_not_mutable_via_params(self):
++        config = _make_config()
++        with pytest.raises(TypeError):
++            config.params["int_p"] = 99
++        assert config.config_hash == compute_config_hash(
++            "immutability_dummy", "1.0", {"int_p": 5, "num_p": 2.5})
++
++    def test_stored_params_match_config_hash(self):
++        # config_hash соответствует ФАКТИЧЕСКИ сохранённым параметрам
++        config = _make_config()
++        assert config.recompute_config_hash() == config.config_hash
++
++    def test_hashable_config_object(self):
++        config = _make_config()
++        # frozen dataclass: hash(config) требует хешируемость всех полей
++        assert hash(config) == hash(_make_config())
++
++
++# ---------------------------------------------------------------------------
++# Требование 7: одинаковая конфигурация после сериализации -> одинаковый hash
++# ---------------------------------------------------------------------------
++
++class TestSerializationHashStability:
++    def test_same_config_after_json_roundtrip_same_hash(self):
++        strategy = _DummyStrategy()
++        params = {"int_p": 7, "num_p": 3.5}
++        config = strategy.get_config(params)
++        payload = json.dumps(config.as_dict(), ensure_ascii=False)
++        restored = json.loads(payload)
++        config2 = strategy.get_config(restored["params"])
++        assert config2.config_hash == config.config_hash
++        assert config2 == config
++
++    def test_hash_independent_of_json_key_order(self):
++        config = _make_config()
++        payload_a = json.dumps(config.as_dict(), sort_keys=True)
++        payload_b = json.dumps(
++            dict(reversed(list(config.as_dict().items()))), sort_keys=True)
++        assert payload_a == payload_b
++        assert json.loads(payload_a)["params"] == json.loads(payload_b)["params"]
++
++    def test_nested_structures_survive_serialization(self):
++        config = _nested_config()
++        payload = json.dumps(config.as_dict(), ensure_ascii=False)
++        restored = json.loads(payload)
++        assert restored["params"]["rsi"]["thresholds"]["upper"] == 70
++        assert restored["params"]["ma_window"][2] == [21, 34]
++        # множество -> отсортированный список (документированная нормализация,
++        # совпадающая с нормализацией config_hash)
++        assert restored["params"]["levels"] == [1.0, 2.0]
++
++
++# ---------------------------------------------------------------------------
++# Требование 8: изменение значимого параметра -> новый hash
++# ---------------------------------------------------------------------------
++
++class TestHashSensitivity:
++    def test_meaningful_param_change_creates_new_hash(self):
++        strategy = _DummyStrategy()
++        h1 = strategy.get_config({"int_p": 5, "num_p": 2.5}).config_hash
++        h2 = strategy.get_config({"int_p": 6, "num_p": 2.5}).config_hash
++        h3 = strategy.get_config({"int_p": 5, "num_p": 2.6}).config_hash
++        assert len({h1, h2, h3}) == 3
++
++    def test_nested_param_change_creates_new_hash(self):
++        params_a = {"int_p": 5, "num_p": 2.5}
++        params_b = {"int_p": 5, "num_p": 2.5, "extra": {"k": [1, 2]}}
++        params_c = {"int_p": 5, "num_p": 2.5, "extra": {"k": [1, 3]}}
++        h_a = compute_config_hash("s", "v", params_a)
++        h_b = compute_config_hash("s", "v", params_b)
++        h_c = compute_config_hash("s", "v", params_c)
++        assert h_a != h_b
++        assert h_b != h_c
++
++    def test_metadata_change_does_not_silently_keep_hash_claim(self):
++        # metadata НЕ входит в config_hash (задокументировано); при этом
++        # конфигурация с той же парой атрибуции остаётся различимой по
++        # содержимому metadata
++        c1 = _make_config(metadata={"profile": "SANDBOX_TEST"})
++        c2 = _make_config(metadata={"profile": "TECH_CHECK"})
++        assert c1.config_hash == c2.config_hash
++        assert c1.metadata["profile"] != c2.metadata["profile"]
++
++
++# ---------------------------------------------------------------------------
++# Требование 9: round-trip сериализация не меняет семантику параметров
++# ---------------------------------------------------------------------------
++
++class TestRoundTripSemantics:
++    def test_round_trip_preserves_param_semantics(self):
++        config = _nested_config()
++        restored = json.loads(json.dumps(config.as_dict(), ensure_ascii=False))
++        params = restored["params"]
++        # семантическое равенство значений; множество представлено
++        # отсортированным списком (документированная JSON-нормализация)
++        assert params == {
++            "rsi": {"thresholds": {"upper": 70, "lower": 30}},
++            "ma_window": [5, 13, [21, 34]],
++            "levels": [1.0, 2.0],
++        }
++
++    def test_json_roundtrip_preserves_config_hash_even_for_sets(self):
++        # множество и его JSON-представление дают ОДИН и тот же config_hash:
++        # _normalize_for_json отображает set -> отсортированный список в
++        # обоих случаях
++        params = {"levels": {1.0, 2.0}, "nested": {"a": [1, 2]}}
++        config = StrategyConfig(
++            strategy_id="s", strategy_version="v",
++            params=params,
++            config_hash=compute_config_hash("s", "v", params),
++        )
++        restored = json.loads(json.dumps(config.as_dict(), ensure_ascii=False))
++        config2 = StrategyConfig(
++            strategy_id=restored["strategy_id"],
++            strategy_version=restored["strategy_version"],
++            params=restored["params"],
++            config_hash=restored["config_hash"],
++            origin=restored["origin"],
++            metadata=restored["metadata"],
++        )
++        # hash, вычисленный по сохранённым параметрам (список после JSON),
++        # совпадает с исходным hash (множество до JSON)
++        assert config2.recompute_config_hash() == config.config_hash
++        assert config2.config_hash == config.config_hash
++        # и обе конфигурации внутренне консистентны
++        assert config.recompute_config_hash() == config.config_hash
++        assert config2.recompute_config_hash() == config2.config_hash
++
++    def test_round_trip_reconstructed_config_is_equal_and_frozen(self):
++        # конфигурация без множеств восстанавливается ПОЛНОСТЬЮ равной
++        config = _direct_config({"int_p": 5, "num_p": 2.5,
++                                 "nested": {"a": [1, 2]}})
++        restored = json.loads(json.dumps(config.as_dict(), ensure_ascii=False))
++        config2 = StrategyConfig(
++            strategy_id=restored["strategy_id"],
++            strategy_version=restored["strategy_version"],
++            params=restored["params"],
++            config_hash=restored["config_hash"],
++            origin=restored["origin"],
++            metadata=restored["metadata"],
++        )
++        assert config2 == config
++        assert isinstance(config2.params, ImmutableMapping)
++        with pytest.raises(TypeError):
++            config2.params["nested"]["a"][0] = 9
++
++    def test_as_dict_is_deep_mutable_copy(self):
++        config = _nested_config()
++        snapshot = config.as_dict()
++        snapshot["params"]["rsi"]["thresholds"]["upper"] = 99
++        snapshot["params"]["ma_window"].append(99)
++        # конфигурация не изменилась
++        assert config.params["rsi"]["thresholds"]["upper"] == 70
++        assert list(config.params["ma_window"]) == [5, 13, [21, 34]]
++
++    def test_unfreeze_and_deep_freeze_are_inverse_for_json_values(self):
++        params = {"a": {"b": [1, 2, {"c": {3}}]}, "d": 1.5}
++        frozen = strategy_api.deep_freeze(params)
++        assert strategy_api.unfreeze(frozen) == params
++        # idempotence
++        assert strategy_api.deep_freeze(frozen) is frozen
++
++
++# ---------------------------------------------------------------------------
++# Служебные гарантии ImmutableMapping/ImmutableList
++# ---------------------------------------------------------------------------
++
++class TestImmutableStructures:
++    def test_immutable_mapping_eq_dict_and_hash_consistent(self):
++        m = ImmutableMapping({"a": 1, "b": [1, 2]})
++        assert m == {"a": 1, "b": [1, 2]}
++        assert {"a": 1, "b": [1, 2]} == m
++        assert hash(ImmutableMapping({"a": 1})) == \
++            hash(ImmutableMapping({"a": 1}))
++
++    def test_immutable_mapping_non_string_keys_rejected(self):
++        with pytest.raises(StrategyConfigError):
++            ImmutableMapping({1: "x"})
++
++    def test_immutable_list_eq_list_and_hash_consistent_with_tuple(self):
++        lst = ImmutableList([1, 2, 3])
++        assert lst == [1, 2, 3]
++        assert lst == (1, 2, 3)
++        assert hash(lst) == hash((1, 2, 3))
++
++    def test_immutable_list_slice_returns_immutable_list(self):
++        lst = ImmutableList([1, 2, 3, 4])
++        assert isinstance(lst[1:3], ImmutableList)
++        assert lst[1:3] == [2, 3]
++
++    def test_deepcopy_and_reduce_keep_freeze(self):
++        config = _nested_config()
++        clone = copy.deepcopy(config)
++        assert clone == config
++        with pytest.raises(TypeError):
++            clone.params["rsi"]["thresholds"]["lower"] = 0
++        with pytest.raises(AttributeError):
++            clone.params["ma_window"].append(0)
++
++    def test_copy_of_frozen_structures_shares_content(self):
++        # неизменяемый объект может безопасно разделять содержимое
++        m = ImmutableMapping({"a": [1, 2]})
++        assert copy.copy(m) == m
++        assert copy.deepcopy(m) == m
++
++
++# ---------------------------------------------------------------------------
++# Совместимость с существующими потребителями конфигурации
++# ---------------------------------------------------------------------------
++
++class TestConsumersCompatibility:
++    def test_strategy_get_config_still_works(self):
++        strategy = _DummyStrategy()
++        config = strategy.get_config({"int_p": 3, "num_p": 1.0})
++        assert config.params == {"int_p": 3, "num_p": 1.0}
++        assert config.recompute_config_hash() == config.config_hash
++
++    def test_signal_metadata_frozen(self):
++        strategy = _DummyStrategy()
++        config = strategy.get_config({"int_p": 3, "num_p": 1.0})
++        signal = strategy.evaluate_entry(
++            strategy_api.EntrySignalInput(
++                figi="F", ticker="T", candles=None, last_price=1.0,
++                extra={"note": "x"}),
++            config)
++        assert isinstance(signal.metadata, ImmutableMapping)
++        with pytest.raises(TypeError):
++            signal.metadata["k"] = "v"
++
++    def test_entry_signal_input_extra_frozen(self):
++        entry = strategy_api.EntrySignalInput(
++            figi="F", ticker="T", candles=None, last_price=1.0,
++            extra={"note": [1, 2]})
++        assert isinstance(entry.extra, ImmutableMapping)
++        with pytest.raises(TypeError):
++            entry.extra["note2"] = "v"
++        with pytest.raises(AttributeError):
++            entry.extra["note"].append(3)
++
++    def test_engine_config_load_path_unaffected(self, tmp_path):
++        from engine_config import EngineStatus, load_engine_config
++        p = tmp_path / "engine.json"
++        p.write_text(json.dumps({"ACTIVE_STRATEGY": None}),
++                     encoding="utf-8")
++        cfg = load_engine_config(engine_json_path=str(p), environ={})
++        assert cfg.status is EngineStatus.UNCONFIGURED
++
++    def test_legacy_adapter_params_still_usable(self):
++        # ImmutableMapping предоставляет items()/get()/[] для моста
++        # к baseline (_override_legacy_config использует params.items())
++        from strategies.legacy_samsung_v4.profiles import \
++            build_regression_params
++        from strategies.legacy_samsung_v4.strategy import \
++            LegacySamsungV4Strategy
++        adapter = LegacySamsungV4Strategy()
++        config = adapter.build_regression_config("SANDBOX_TEST")
++        assert dict(config.params.items()) == \
++            dict(build_regression_params("SANDBOX_TEST"))
++        assert config.metadata.get("profile") == "SANDBOX_TEST"
++        assert config.recompute_config_hash() == config.config_hash
+diff --git a/stage_a_zip/SAMSUNG_V4_STAGE_A/candidate/tests/test_stage_a_attribution.py b/stage_a1/candidate/tests/test_stage_a_attribution.py
+index 4ad3054..d769827 100755
+--- a/stage_a_zip/SAMSUNG_V4_STAGE_A/candidate/tests/test_stage_a_attribution.py
++++ b/stage_a1/candidate/tests/test_stage_a_attribution.py
+@@ -9,6 +9,15 @@
+ #     значений; старые файлы не переписываются);
+ #   * отсутствие атрибуции у нового объекта НЕ маскируется (fail-closed).
+ #
++# ИЗМЕНЕНО В STAGE A.1 (замечания №2/№3 аудита; архитектурная адаптация,
++# НЕ смена эталонов): глобальный контекст атрибуции УДАЛЕН из attribution.py
++# как обязательный источник (set_current_context/get_current_context/
++# clear_current_context больше не существуют). Контекст передаётся ЯВНО в
++# каждый вызов; отсутствие контекста — явная ошибка (AttributionRequiredError
++# при None, TypeError при отсутствующем аргументе). Формулировки проверок
++# сохранены; дополнительные тесты явного DI и параллельной изоляции — в
++# tests/test_stage_a1_attribution_explicit.py.
++#
+ # Offline; без сети, брокера и заявок. Файлы создаются только в tmp_path.
+ 
+ import csv
+@@ -24,12 +33,9 @@ from attribution import (
+     AttributionError,
+     AttributionRequiredError,
+     append_attributed_csv_row,
+-    clear_current_context,
+-    get_current_context,
+     legacy_attribution_view,
+     read_csv_attribution_report,
+     record_has_attribution,
+-    set_current_context,
+     stamp,
+ )
+ import config as legacy_config
+@@ -49,14 +55,6 @@ def context():
+     )
+ 
+ 
+-@pytest.fixture(autouse=True)
+-def _clean_current_context():
+-    # изоляция глобального состояния атрибуции между тестами
+-    clear_current_context()
+-    yield
+-    clear_current_context()
+-
+-
+ @pytest.fixture
+ def legacy_trade_fields():
+     # историческая схема торгового CSV из production logger.py (только чтение)
+@@ -82,19 +80,31 @@ class TestStampingNewObjects:
+         assert event == {"x": 1}
+ 
+     def test_missing_context_fails_closed(self):
+-        # никакой фиктивной атрибуции: без контекста новый объект запрещён
++        # никакой фиктивной атрибуции: контекст ОБЯЗАТЕЛЕН (Stage A.1).
++        # Явно переданный None -> AttributionRequiredError; отсутствующий
++        # аргумент -> TypeError (fail-closed до входа в функцию).
+         with pytest.raises(AttributionRequiredError):
++            stamp({"x": 1}, None)
++        with pytest.raises(TypeError):
+             stamp({"x": 1})
+ 
+     def test_missing_context_error_message_explains(self):
+         with pytest.raises(AttributionRequiredError) as exc:
+-            stamp({})
+-        assert "фиктивные значения запрещены" in str(exc.value)
+-
+-    def test_current_context_is_used_when_set(self, context):
+-        set_current_context(context)
+-        stamped = stamp({"x": 1})
++            stamp({}, None)
++        message = str(exc.value)
++        assert "фиктивные значения запрещены" in message
++        assert "контекст" in message
++
++    def test_explicit_context_is_the_only_source(self, context):
++        # Stage A.1: атрибуция ТОЛЬКО из явно переданного контекста;
++        # глобального состояния не существует
++        assert not hasattr(at, "set_current_context")
++        assert not hasattr(at, "get_current_context")
++        assert not hasattr(at, "clear_current_context")
++        assert not hasattr(at, "_current_context")
++        stamped = stamp({"x": 1}, context)
+         assert stamped["strategy_id"] == "legacy_samsung_v4"
++        assert stamped["config_hash"] == "a" * 64
+ 
+     def test_conflicting_existing_attribution_rejected(self, context):
+         record = {"strategy_id": "other", "config_hash": "b" * 64}
+@@ -214,10 +224,12 @@ class TestAttributedCsvWriter:
+         assert first.split(";")[-2:] == list(ATTRIBUTION_FIELDS)
+ 
+     def test_no_context_no_row(self, tmp_path):
++        # Stage A.1: контекст обязателен; None -> AttributionRequiredError,
++        # файл не создаётся
+         path = str(tmp_path / "engine_events.csv")
+         with pytest.raises(AttributionRequiredError):
+             append_attributed_csv_row(
+-                path, {"event_id": "E1"}, self.BASE_FIELDS)
++                path, {"event_id": "E1"}, self.BASE_FIELDS, context=None)
+         assert not os.path.isfile(path)
+ 
+     def test_legacy_reader_still_reads_base_columns(self, tmp_path, context):
+@@ -270,9 +282,9 @@ class TestEngineConfigLink:
+         assert cfg.attribution is None
+         with pytest.raises(EngineConfigError):
+             require_trading_ready(cfg)
+-        # и штампование без явного контекста запрещено
++        # и штампование без явного контекста запрещено (None передан явно)
+         with pytest.raises(AttributionRequiredError):
+-            stamp({})
++            stamp({}, None)
+ 
+     def test_config_error_produces_no_attribution(self, tmp_path):
+         p = tmp_path / "engine.json"
