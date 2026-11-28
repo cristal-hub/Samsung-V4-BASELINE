@@ -1,0 +1,337 @@
+================================================================================
+TEST_RESULTS_STAGE_A_2_1.txt — STAGE A.2.1
+SAMSUNG V4 — NEW STRATEGY ENGINE. FINAL CORRECTIVE:
+ЗАКРЫТИЕ ОБХОДОВ config_hash И AttributionContext
+Дата прогона: 2026-11-28
+Исходный пакет: Samsung_V4_STAGE_A_2 (Stage A.2, использован без изменений)
+Baseline: commit 884cefd6f12a99f6adc14b5ed4c9eeda21d32e04
+(cristal-hub/Samsung-V4-BASELINE), изолированная копия
+Режим: ТОЛЬКО offline — без сети, без брокера, без Sandbox/LIVE-заявок
+================================================================================
+
+0. ЧТО ПРОВЕРЯЛОСЬ
+--------------------------------------------------------------------------------
+Три оставшихся ограничения независимой проверки Stage A.2:
+  №1  прямое создание AttributionContext(strategy_id, config_hash) выпускало
+      контекст без проверки соответствия config_hash реальной StrategyConfig;
+  №2  from_config() доверял isinstance(StrategyConfig) и переопределяемому
+      recompute_config_hash() подкласса;
+  №3  изменяемый Enum.value позволял менять содержимое параметров ПОСЛЕ
+      вычисления config_hash.
+
+После исправления:
+  * контекст создаётся ТОЛЬКО из проверенной StrategyConfig (охраняемый
+    конструктор с внутренним приватным билетом; любые попытки обычного
+    публичного создания парой строк — AttributionError);
+  * _resolve_context/factory/stamp/CSV/JSONL принимают только подтверждённый
+    контекст (маркер проверенного создания) или точный StrategyConfig;
+  * from_config принимает ТОЛЬКО точный тип StrategyConfig (наследование не
+    поддерживается — решение документировано) и перепроверяет хеш ИСХОДНЫМ
+    алгоритмом compute_config_hash по фактическим полям;
+  * Enum.value обязан быть безопасным неизменяемым скаляром
+    (None/bool/int/float/str) — рекурсивная проверка при создании, при
+    прямом compute_config_hash и в deep_freeze;
+  * неизменяемость контекста и фабрики сохранена; deepcopy/pickle не теряют
+    проверенность; хеши корректных существующих конфигураций сохранены.
+
+1. ОКРУЖЕНИЕ ПРОГОНА (совпадает с окружением Stage A / A.1 / A.2)
+--------------------------------------------------------------------------------
+  Python 3.12.16; pytest (offline); платформа Linux (sandbox);
+  сеть не использовалась; брокерские подключения отсутствуют; файлы —
+  только в tmp_path (кроме фиксированных golden-фикстур, читаемых без записи).
+
+2. СВОДКА РЕЗУЛЬТАТОВ
+--------------------------------------------------------------------------------
+  Полный набор (python -m pytest, candidate/):
+    ДО изменений  (Stage A.2 как есть)     : 1037 passed, 0 failed, 0 skipped
+    ПОСЛЕ изменений (Stage A.2.1)          : 1113 passed, 0 failed, 0 skipped
+    Прирост: +76 тестов (новый обязательный файл Stage A.2.1)
+  Канонический поднабор (python -m pytest tests):
+    ДО  : 517 passed
+    ПОСЛЕ: 593 passed (517 + 76 новых)
+  Обязательные тесты tests/test_stage_a2_1_context_integrity.py : 76 passed
+  Тесты Stage A.2 test_stage_a2_config_hash_integrity.py        : 57 passed
+    (без изменений и без ослаблений)
+  Тесты Stage A.1 (attribution_explicit + config_immutability)  : 81 passed
+    (без изменений и без ослаблений)
+
+  Единственные падения переходного периода: 9 ERROR в
+  tests/test_stage_a_attribution.py ПОСЛЕ правки кода и ДО адаптации
+  фикстуры (закрытие прямого создания контекста в фикстуре Stage A).
+  Устранены адаптацией фикстуры по правилу Stage A.2/A.2.1 (контекст только
+  из проверенной StrategyConfig; семантика утверждений не ослаблена).
+  Финальное состояние: 0 failed, 0 skipped, 0 xfail.
+
+3. ПОЛНЫЙ ЛОГ ДО ИЗМЕНЕНИЙ (Stage A.2 как есть; pristine-пакет ZIP)
+--------------------------------------------------------------------------------
+============================= test session starts ==============================
+platform linux -- Python 3.12.16, pytest-9.0.2, pluggy-1.6.0
+rootdir: /home/z
+configfile: pyproject.toml
+plugins: Faker-40.1.2, metadata-3.1.1, asyncio-1.3.0, ddtrace-4.2.2, cov-7.0.0, json-report-1.5.0, anyio-4.13.0
+asyncio: mode=Mode.STRICT, debug=False, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
+collected 1037 items
+
+test_b2_close_accounting.py ....................                         [  1%]
+test_b2_csv_recovery.py ..............                                   [  3%]
+test_b2_terminal_metadata_recovery.py ........                           [  4%]
+test_b2_v4_accounting_consistency.py .........                           [  4%]
+test_b2_v5_identity_and_timestamp.py ..........                          [  5%]
+test_b2_v6_timestamp_identity_close_reason.py ................           [  7%]
+test_b2_v7_cursor_version_and_alt_timestamp.py ...................       [  9%]
+test_buy_accounting_audit.py .......................                     [ 11%]
+test_buy_registration_fix2.py ..................                         [ 13%]
+test_buy_registration_fix2_FIX2_snapshot.py .......                      [ 13%]
+test_commission.py ..........                                            [ 14%]
+test_corrective_audit_v2.py ..................                           [ 16%]
+test_corrective_audit_v3.py .................                            [ 18%]
+test_execution.py ..........                                             [ 19%]
+test_fail_closed.py ........                                             [ 19%]
+test_main.py ...........                                                 [ 21%]
+test_main_helpers.py ..................                                  [ 22%]
+test_manual_close_integration.py .......                                 [ 23%]
+test_order_ledger.py ..........                                          [ 24%]
+test_p0_batch2_late_execution.py ...................                     [ 26%]
+test_p0_defect_fixes.py ...........................                      [ 28%]
+test_p0_sell_id_fixes.py ........................                        [ 31%]
+test_persistence.py .........                                            [ 32%]
+test_risk_manager.py ...................                                 [ 33%]
+test_safety.py .......                                                   [ 34%]
+test_screener.py .........                                               [ 35%]
+test_slippage.py ...........                                             [ 36%]
+test_stage1_packet_v.py ............                                     [ 37%]
+test_stage1_s1_telemetry.py ..............                               [ 38%]
+test_strategy.py .............                                           [ 40%]
+test_telegram_handlers.py ..........                                     [ 41%]
+test_tinkoff_client.py ......................                            [ 43%]
+test_tinkoff_client_currency.py ......                                   [ 43%]
+test_trading_flag.py .......                                             [ 44%]
+test_v232_close_defects.py ........                                      [ 45%]
+test_v233_partial_sell_reopen_defect.py .......                          [ 45%]
+test_v4_integration_integrity.py ........                                [ 46%]
+test_v4_order_ledger_first_append.py .................                   [ 48%]
+test_v4_safety_build.py ..................                               [ 50%]
+tests/test_buy_registration_fix2.py ..................                   [ 51%]
+tests/test_buy_registration_fix2_FIX2_snapshot.py .......                [ 52%]
+tests/test_commission.py ..........                                      [ 53%]
+tests/test_execution.py ..........                                       [ 54%]
+tests/test_fail_closed.py ........                                       [ 55%]
+tests/test_main.py ...........                                           [ 56%]
+tests/test_main_helpers.py ..................                            [ 58%]
+tests/test_order_ledger.py ..........                                    [ 59%]
+tests/test_p0_batch2_late_execution.py ...................               [ 60%]
+tests/test_p0_defect_fixes.py ...........................                [ 63%]
+tests/test_persistence.py .........                                      [ 64%]
+tests/test_risk_manager.py ...................                           [ 66%]
+tests/test_safety.py .......                                             [ 66%]
+tests/test_screener.py .........                                         [ 67%]
+tests/test_slippage.py ...........                                       [ 68%]
+tests/test_stage_a1_attribution_explicit.py ............................ [ 71%]
+.....                                                                    [ 71%]
+tests/test_stage_a1_config_immutability.py ............................. [ 74%]
+...................                                                      [ 76%]
+tests/test_stage_a2_config_hash_integrity.py ........................... [ 79%]
+..............................                                           [ 82%]
+tests/test_stage_a_attribution.py ......................                 [ 84%]
+tests/test_stage_a_engine_config.py ........................             [ 86%]
+tests/test_stage_a_legacy_adapter.py ...............................     [ 89%]
+tests/test_stage_a_legacy_profiles.py ...........                        [ 90%]
+tests/test_stage_a_schema.py ..................                          [ 92%]
+tests/test_stage_a_strategy_api.py ......................                [ 94%]
+tests/test_strategy.py .............                                     [ 95%]
+tests/test_telegram_handlers.py ..........                               [ 96%]
+tests/test_tinkoff_client.py ......................                      [ 98%]
+tests/test_tinkoff_client_currency.py ......                             [ 99%]
+tests/test_trading_flag.py .......                                       [100%]
+
+============================ 1037 passed in 22.90s =============================
+================================================================================
+4. ПОЛНЫЙ ЛОГ ПОСЛЕ ИЗМЕНЕНИЙ (Stage A.2.1; полный набор)
+================================================================================
+============================= test session starts ==============================
+platform linux -- Python 3.12.16, pytest-9.0.2, pluggy-1.6.0
+rootdir: /home/z
+configfile: pyproject.toml
+plugins: Faker-40.1.2, metadata-3.1.1, asyncio-1.3.0, ddtrace-4.2.2, cov-7.0.0, json-report-1.5.0, anyio-4.13.0
+asyncio: mode=Mode.STRICT, debug=False, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
+collected 1113 items
+
+test_b2_close_accounting.py ....................                         [  1%]
+test_b2_csv_recovery.py ..............                                   [  3%]
+test_b2_terminal_metadata_recovery.py ........                           [  3%]
+test_b2_v4_accounting_consistency.py .........                           [  4%]
+test_b2_v5_identity_and_timestamp.py ..........                          [  5%]
+test_b2_v6_timestamp_identity_close_reason.py ................           [  6%]
+test_b2_v7_cursor_version_and_alt_timestamp.py ...................       [  8%]
+test_buy_accounting_audit.py .......................                     [ 10%]
+test_buy_registration_fix2.py ..................                         [ 12%]
+test_buy_registration_fix2_FIX2_snapshot.py .......                      [ 12%]
+test_commission.py ..........                                            [ 13%]
+test_corrective_audit_v2.py ..................                           [ 15%]
+test_corrective_audit_v3.py .................                            [ 16%]
+test_execution.py ..........                                             [ 17%]
+test_fail_closed.py ........                                             [ 18%]
+test_main.py ...........                                                 [ 19%]
+test_main_helpers.py ..................                                  [ 21%]
+test_manual_close_integration.py .......                                 [ 21%]
+test_order_ledger.py ..........                                          [ 22%]
+test_p0_batch2_late_execution.py ...................                     [ 24%]
+test_p0_defect_fixes.py ...........................                      [ 26%]
+test_p0_sell_id_fixes.py ........................                        [ 29%]
+test_persistence.py .........                                            [ 29%]
+test_risk_manager.py ...................                                 [ 31%]
+test_safety.py .......                                                   [ 32%]
+test_screener.py .........                                               [ 32%]
+test_slippage.py ...........                                             [ 33%]
+test_stage1_packet_v.py ............                                     [ 35%]
+test_stage1_s1_telemetry.py ..............                               [ 36%]
+test_strategy.py .............                                           [ 37%]
+test_telegram_handlers.py ..........                                     [ 38%]
+test_tinkoff_client.py ......................                            [ 40%]
+test_tinkoff_client_currency.py ......                                   [ 40%]
+test_trading_flag.py .......                                             [ 41%]
+test_v232_close_defects.py ........                                      [ 42%]
+test_v233_partial_sell_reopen_defect.py .......                          [ 42%]
+test_v4_integration_integrity.py ........                                [ 43%]
+test_v4_order_ledger_first_append.py .................                   [ 45%]
+test_v4_safety_build.py ..................                               [ 46%]
+tests/test_buy_registration_fix2.py ..................                   [ 48%]
+tests/test_buy_registration_fix2_FIX2_snapshot.py .......                [ 48%]
+tests/test_commission.py ..........                                      [ 49%]
+tests/test_execution.py ..........                                       [ 50%]
+tests/test_fail_closed.py ........                                       [ 51%]
+tests/test_main.py ...........                                           [ 52%]
+tests/test_main_helpers.py ..................                            [ 54%]
+tests/test_order_ledger.py ..........                                    [ 54%]
+tests/test_p0_batch2_late_execution.py ...................               [ 56%]
+tests/test_p0_defect_fixes.py ...........................                [ 59%]
+tests/test_persistence.py .........                                      [ 59%]
+tests/test_risk_manager.py ...................                           [ 61%]
+tests/test_safety.py .......                                             [ 62%]
+tests/test_screener.py .........                                         [ 63%]
+tests/test_slippage.py ...........                                       [ 64%]
+tests/test_stage_a1_attribution_explicit.py ............................ [ 66%]
+.....                                                                    [ 67%]
+tests/test_stage_a1_config_immutability.py ............................. [ 69%]
+...................                                                      [ 71%]
+tests/test_stage_a2_1_context_integrity.py ............................. [ 73%]
+...............................................                          [ 78%]
+tests/test_stage_a2_config_hash_integrity.py ........................... [ 80%]
+..............................                                           [ 83%]
+tests/test_stage_a_attribution.py ......................                 [ 85%]
+tests/test_stage_a_engine_config.py ........................             [ 87%]
+tests/test_stage_a_legacy_adapter.py ...............................     [ 90%]
+tests/test_stage_a_legacy_profiles.py ...........                        [ 91%]
+tests/test_stage_a_schema.py ..................                          [ 92%]
+tests/test_stage_a_strategy_api.py ......................                [ 94%]
+tests/test_strategy.py .............                                     [ 95%]
+tests/test_telegram_handlers.py ..........                               [ 96%]
+tests/test_tinkoff_client.py ......................                      [ 98%]
+tests/test_tinkoff_client_currency.py ......                             [ 99%]
+tests/test_trading_flag.py .......                                       [100%]
+
+============================ 1113 passed in 22.56s =============================
+================================================================================
+5. ПОЛНЫЙ ЛОГ ДО ИЗМЕНЕНИЙ — канонический поднабор tests/
+================================================================================
+============================= test session starts ==============================
+platform linux -- Python 3.12.16, pytest-9.0.2, pluggy-1.6.0
+rootdir: /home/z
+configfile: pyproject.toml
+plugins: Faker-40.1.2, metadata-3.1.1, asyncio-1.3.0, ddtrace-4.2.2, cov-7.0.0, json-report-1.5.0, anyio-4.13.0
+asyncio: mode=Mode.STRICT, debug=False, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
+collected 517 items
+
+tests/test_buy_registration_fix2.py ..................                   [  3%]
+tests/test_buy_registration_fix2_FIX2_snapshot.py .......                [  4%]
+tests/test_commission.py ..........                                      [  6%]
+tests/test_execution.py ..........                                       [  8%]
+tests/test_fail_closed.py ........                                       [ 10%]
+tests/test_main.py ...........                                           [ 12%]
+tests/test_main_helpers.py ..................                            [ 15%]
+tests/test_order_ledger.py ..........                                    [ 17%]
+tests/test_p0_batch2_late_execution.py ...................               [ 21%]
+tests/test_p0_defect_fixes.py ...........................                [ 26%]
+tests/test_persistence.py .........                                      [ 28%]
+tests/test_risk_manager.py ...................                           [ 32%]
+tests/test_safety.py .......                                             [ 33%]
+tests/test_screener.py .........                                         [ 35%]
+tests/test_slippage.py ...........                                       [ 37%]
+tests/test_stage_a1_attribution_explicit.py ............................ [ 42%]
+.....                                                                    [ 43%]
+tests/test_stage_a1_config_immutability.py ............................. [ 49%]
+...................                                                      [ 52%]
+tests/test_stage_a2_config_hash_integrity.py ........................... [ 58%]
+..............................                                           [ 64%]
+tests/test_stage_a_attribution.py ......................                 [ 68%]
+tests/test_stage_a_engine_config.py ........................             [ 72%]
+tests/test_stage_a_legacy_adapter.py ...............................     [ 78%]
+tests/test_stage_a_legacy_profiles.py ...........                        [ 81%]
+tests/test_stage_a_schema.py ..................                          [ 84%]
+tests/test_stage_a_strategy_api.py ......................                [ 88%]
+tests/test_strategy.py .............                                     [ 91%]
+tests/test_telegram_handlers.py ..........                               [ 93%]
+tests/test_tinkoff_client.py ......................                      [ 97%]
+tests/test_tinkoff_client_currency.py ......                             [ 98%]
+tests/test_trading_flag.py .......                                       [100%]
+
+============================= 517 passed in 8.99s ==============================
+================================================================================
+6. ПОЛНЫЙ ЛОГ ПОСЛЕ ИЗМЕНЕНИЙ — канонический поднабор tests/
+================================================================================
+============================= test session starts ==============================
+platform linux -- Python 3.12.16, pytest-9.0.2, pluggy-1.6.0
+rootdir: /home/z
+configfile: pyproject.toml
+plugins: Faker-40.1.2, metadata-3.1.1, asyncio-1.3.0, ddtrace-4.2.2, cov-7.0.0, json-report-1.5.0, anyio-4.13.0
+asyncio: mode=Mode.STRICT, debug=False, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
+collected 593 items
+
+tests/test_buy_registration_fix2.py ..................                   [  3%]
+tests/test_buy_registration_fix2_FIX2_snapshot.py .......                [  4%]
+tests/test_commission.py ..........                                      [  5%]
+tests/test_execution.py ..........                                       [  7%]
+tests/test_fail_closed.py ........                                       [  8%]
+tests/test_main.py ...........                                           [ 10%]
+tests/test_main_helpers.py ..................                            [ 13%]
+tests/test_order_ledger.py ..........                                    [ 15%]
+tests/test_p0_batch2_late_execution.py ...................               [ 18%]
+tests/test_p0_defect_fixes.py ...........................                [ 23%]
+tests/test_persistence.py .........                                      [ 24%]
+tests/test_risk_manager.py ...................                           [ 27%]
+tests/test_safety.py .......                                             [ 29%]
+tests/test_screener.py .........                                         [ 30%]
+tests/test_slippage.py ...........                                       [ 32%]
+tests/test_stage_a1_attribution_explicit.py ............................ [ 37%]
+.....                                                                    [ 38%]
+tests/test_stage_a1_config_immutability.py ............................. [ 43%]
+...................                                                      [ 46%]
+tests/test_stage_a2_1_context_integrity.py ............................. [ 51%]
+...............................................                          [ 59%]
+tests/test_stage_a2_config_hash_integrity.py ........................... [ 63%]
+..............................                                           [ 68%]
+tests/test_stage_a_attribution.py ......................                 [ 72%]
+tests/test_stage_a_engine_config.py ........................             [ 76%]
+tests/test_stage_a_legacy_adapter.py ...............................     [ 81%]
+tests/test_stage_a_legacy_profiles.py ...........                        [ 83%]
+tests/test_stage_a_schema.py ..................                          [ 86%]
+tests/test_stage_a_strategy_api.py ......................                [ 90%]
+tests/test_strategy.py .............                                     [ 92%]
+tests/test_telegram_handlers.py ..........                               [ 94%]
+tests/test_tinkoff_client.py ......................                      [ 97%]
+tests/test_tinkoff_client_currency.py ......                             [ 98%]
+tests/test_trading_flag.py .......                                       [100%]
+
+============================= 593 passed in 9.47s ==============================
+================================================================================
+7. СРЕДА ЗАПУСКА ДЛЯ ВОСПРОИЗВЕДЕНИЯ
+--------------------------------------------------------------------------------
+  cd candidate
+  python -m pytest            # полный набор (1113 passed)
+  python -m pytest tests      # канонический поднабор (593 passed)
+  python -m pytest tests/test_stage_a2_1_context_integrity.py     # (76)
+  python -m pytest tests/test_stage_a2_config_hash_integrity.py   # (57)
+
+Все прогоны выполнены offline; никаких реальных сетевых обращений,
+брокерских подключений, Sandbox-заявок и LIVE-заявок не было.
+================================================================================

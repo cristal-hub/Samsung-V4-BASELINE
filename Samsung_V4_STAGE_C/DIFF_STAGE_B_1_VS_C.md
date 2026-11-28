@@ -1,0 +1,3364 @@
+# DIFF_STAGE_B_1_VS_C.md
+# SAMSUNG V4 — NEW STRATEGY ENGINE. DIFF: STAGE B.1 → STAGE C
+
+Дата: 2026-11-28.
+База: принятый пакет Stage B.1 (commit
+`e413c5bd6bdec436ffd7aeece4c28b5e969c6306`), побайтово не изменён —
+сверка всех 223 файлов пакета с принятым ZIP: 223 совпадают, 0 изменены,
+0 отсутствуют (см. STAGE_C_IMMUTABILITY_PROOF.txt).
+
+Stage C — АДДИТИВНЫЙ пакет: к принятой базе добавлены РОВНО 3 файла;
+ни один существующий файл (включая strategy_api.py, attribution.py,
+strategy_state.py, legacy_samsung_v4/, все старые тесты и golden
+fixtures) не изменён.
+
+## 1. Сводка изменений
+
+| Изменение | Файл | Суть | Строк |
+|---|---|---|---|
+| НОВЫЙ | `candidate/strategy_contracts.py` | Контрактный слой Stage C: Entry/Exit контракты, fail-closed проверка цены, детерминированный merge выходов, координатор с интеграцией Stage B.1 | 1716 |
+| НОВЫЙ | `candidate/tests/test_stage_c_contracts.py` | Тесты контрактов (ТЗ §6.1–§6.8, §6.14) | 829 |
+| НОВЫЙ | `candidate/tests/test_stage_c_exit_service.py` | Тесты координатора и интеграции состояния (ТЗ §6.9–§6.17) | 683 |
+
+ИТОГО: 3228 новых строк; 0 изменённых строк в существующих файлах;
+0 удалённых файлов; 0 удалённых/ослабленных тестов; golden fixtures
+не перегенерированы.
+
+## 2. Что добавлено и почему (ТЗ Stage C §2–§3)
+
+### 2.1 Entry contract (`EntryEvaluation`, `EntryEvaluationRunner`) — §3.1
+* `EntryOutcome`: ENTRY_ALLOWED / NO_SIGNAL / ENTRY_FORBIDDEN /
+  DATA_INSUFFICIENT / INVALID_STRATEGY_RESULT / EVALUATION_ERROR.
+  Единственное состояние, допускающее вход — ENTRY_ALLOWED; при ошибке,
+  нехватке данных или некорректном результате стратегии вход разрешён
+  быть не может (fail-closed).
+* Атрибуция каждого результата: strategy_id, config_hash, figi,
+  outcome, reason_code, diagnostics (JSON-совместимые, замороженные).
+* Рантайм конвертирует ВСЕ проблемы в явные состояния: нехватка
+  данных -> DATA_INSUFFICIENT (свечи, цена NaN/<=0), исключение
+  стратегии -> EVALUATION_ERROR, некорректный результат (тип,
+  подмена strategy_id/config_hash, чужой figi, неизвестное
+  направление) -> INVALID_STRATEGY_RESULT. Смысл контракта Stage A
+  (Strategy.evaluate_entry -> Signal) не меняется.
+
+### 2.2 Exit contract (`ExitEvaluation`, `ExitEvaluationRequest`) — §3.2
+* `ExitOutcome`: STRATEGIC_EXIT / PROTECTIVE_EXIT / NO_EXIT /
+  EVALUATION_BLOCKED; `ExitDecisionSource`: STRATEGIC / PROTECTIVE /
+  PRICE_GATE — стратегический и защитный источники решений остаются
+  РАЗНЫМИ.
+* Согласованность исходов и источников проверяется при создании
+  (STRATEGIC_EXIT <-> STRATEGIC, PROTECTIVE_EXIT <-> PROTECTIVE,
+  NO_EXIT <-> слой оценки, EVALUATION_BLOCKED <-> цена/слой);
+  exit_type обязателен ТОЛЬКО у реальных выходов.
+
+### 2.3 Exit merging (`merge_exit_evaluations`, `ExitMergeResult`) — §3.3
+* ЧИСТАЯ функция (без времени/случайности/обращения к состоянию):
+  одинаковые входы -> одинаковый итог.
+* Явная таблица истинности (EXIT_MERGE_RULES_VERSION =
+  exit_merge_rules_v1):
+  | защитный \ стратегический | STRATEGIC_EXIT | NO_EXIT | BLOCKED |
+  |---|---|---|---|
+  | PROTECTIVE_EXIT | PROTECTIVE_EXIT | PROTECTIVE_EXIT | PROTECTIVE_EXIT |
+  | NO_EXIT | STRATEGIC_EXIT | NO_EXIT | INCOMPLETE_STRATEGIC_EVALUATION |
+  | BLOCKED | INCOMPLETE_PROTECTIVE_EVALUATION (все случаи) |
+* Свойства: защитный выход побеждает ВСЕГДА (нельзя потерять);
+  стратегический не может отменить/подавить защитный; отсутствие
+  стратегического не отменяет защитный; конфликтные причины
+  обрабатываются по таблице; итог сохраняет источник и причину;
+  информация обоих входов сохраняется в diagnostics (ничего не
+  отбрасывается молча).
+
+### 2.4 Missing price — fail-closed (`PriceData`, `check_price`) — §3.4
+* Цена представляется ТОЛЬКО проверенным `PriceData` (конечное число
+  СТРОГО > 0; NaN/Infinity/0/отрицательные отклоняются при создании —
+  нулевая цена не может попасть в контракт).
+* `check_price`: PRICE_MISSING / PRICE_INVALID (тип, чужой FIGI,
+  метка в будущем, нечитаемая метка) / PRICE_STALE (возраст превышает
+  ЯВНО заданный max_age_seconds) / PRICE_OK. Подстановки нулём или
+  «последней известной ценой» НЕ существует как механизма.
+* Координатор: при price_required=True и непройденной проверке цены
+  оценщики НЕ вызываются, состояние НЕ изменяется, возвращается отчёт
+  с итогом INCOMPLETE_PRICE_EVALUATION и диагностикой; переданная,
+  но некорректная цена блокируется даже при price_required=False.
+
+### 2.5 Интеграция состояния (`ExitDecisionCoordinator`) — §3.5
+* Требует точный тип StrategyStateManager (Stage B.1); состояние
+  изолировано по (strategy_id, FIGI); config_hash перепроверяется
+  ИСХОДНЫМ алгоритмом Stage A.2.1 (AttributionContext.from_config)
+  ДО любой оценки.
+* Запись решения — ТОЛЬКО через существующий атомарный API
+  manager.update_state (read-modify-write под замком хранилища);
+  ошибки состояния пробрасываются как есть (StateConfigMismatchError,
+  StateCorruptionError — не маскируются).
+* При INCOMPLETE_* итогах состояние НЕ изменяется вовсе (нельзя менять
+  состояние «как будто выход состоялся»); запись — контрактное решение
+  (ключ last_exit_evaluation), НЕ исполнение: заявок нет.
+
+### 2.6 Границы (ТЗ §4–§5) — НЕ реализовано и не затронуто
+симулятор, загрузчик исторических данных, Sandbox adapter, заявки,
+брокер, risk sizing, EmergencyExitController, гибрид LIMIT→reconcile→
+MARKET, новая стратегия, оптимизация, Force Trade, legacy_samsung_v4
+(остаётся REGRESSION_ONLY). Обход через подклассы закрыт точными
+типами (type(x) is X) на всех границах потребителей.
+
+## 3. Полный unified diff (реальный вывод difflib.unified_diff)
+
+Новые файлы добавляются целиком, поэтому diff содержит их полное
+содержимое (3228 строк). Идентичный машинный артефакт:
+DIFF_STAGE_B_1_VS_C.patch.
+
+### candidate/strategy_contracts.py
+Ядро Stage C: типизированные контракты входа/выхода, fail-closed проверка цены, детерминированное объединение выходов, координатор с интеграцией Stage B.1
+
+```diff
+--- a/candidate/strategy_contracts.py
++++ b/candidate/strategy_contracts.py
+@@ -0,0 +1,1716 @@
++# strategy_contracts.py — SAMSUNG V4 — NEW STRATEGY ENGINE. STAGE C.
++#
++# ТИПИЗИРОВАННЫЕ КОНТРАКТЫ ВХОДА/ВЫХОДА И ДЕТЕРМИНИРОВАННОЕ
++# ОБЪЕДИНЕНИЕ ВЫХОДОВ (ТЗ Stage C §2–§3).
++#
++# Назначение:
++#   * Entry contract — типизированный результат проверки входа
++#     (§3.1): однозначно различает разрешённый вход, отсутствие
++#     сигнала, запрет входа, недостаточность/некорректность исходных
++#     данных (и отдельные явные состояния для некорректного результата
++#     стратегии и ошибки оценки — ни одно из них НЕ допускает вход);
++#   * Exit contract — типизированный результат оценки выхода (§3.2):
++#     стратегический выход, защитный выход, отсутствие выхода,
++#     невозможность безопасной оценки; стратегический и защитный
++#     источники решений остаются РАЗНЫМИ;
++#   * Exit merging — детерминированное объединение стратегического и
++#     защитного выходов (§3.3): защитный выход нельзя потерять,
++#     стратегический не может отменить/подавить защитный, правила
++#     приоритета явные и документированные (таблица истинности ниже);
++#   * Missing price — fail-closed (§3.4): отсутствующая/некорректная/
++#     устаревшая цена НЕ подменяется нулём или последней известной
++#     ценой, фиктивный выход не создаётся, состояние не изменяется
++#     «как будто выход состоялся» — возвращается отдельный типизиро-
++#     ванный результат невозможности безопасной оценки;
++#   * State integration (§3.5): интеграция с StrategyStateManager
++#     Stage B.1 — изоляция по (strategy_id, FIGI), проверка config_hash,
++#     обновление ТОЛЬКО через существующий атомарный API, ошибки
++#     состояния не маскируются.
++#
++# ГРАНИЦЫ STAGE C (ТЗ §4 — строго соблюдены):
++#   * это контрактный слой и интеграция состояния, а НЕ торговое
++#     исполнение: модуль НЕ размещает и НЕ отменяет заявки, НЕ
++#     подключается к брокеру/Sandbox/LIVE, НЕ реализует симулятор,
++#     исторические данные, risk sizing, EmergencyExitController,
++#     гибрид LIMIT→reconcile→MARKET, Force Trade и новую торговую
++#     стратегию;
++#   * смысл принятых контрактов Stage A.2.1 (StrategyConfig,
++#     AttributionContext, Signal, EntrySignalInput) и Stage B.1
++#     (StrategyState/StateStore/StrategyStateManager) НЕ меняется —
++#     модуль только ПОТРЕБЛЯЕТ их через существующие публичные API;
++#   * legacy_samsung_v4 остаётся REGRESSION_ONLY; старые runtime-файлы
++#     Samsung не читаются и не пишутся.
++#
++# Защита от обхода проверок через подклассы (ТЗ §5):
++#   * все контрактные объекты — frozen dataclass с валидацией в
++#     __post_init__;
++#   * ВСЕ потребители контрактов (merge, координатор, валидаторы)
++#     принимают объекты ТОЛЬКО точного типа (type(x) is X) — подкласс,
++#     ослабивший __post_init__, не проходит границу потребителя;
++#   * атрибуция (strategy_id, config_hash, figi) перепроверяется на
++#     согласованность на каждой границе; координатор дополнительно
++#     перепроверяет config_hash ИСХОДНЫМ алгоритмом Stage A.2.1
++#     (AttributionContext.from_config), а не доверяет полям объекта.
++#
++# Режим: OFFLINE / READ ONLY DATA / RESEARCH ONLY / NO LIVE ORDERS /
++# NO REAL MONEY. Сетевых запросов к брокеру, Sandbox или LIVE нет.
++
++from __future__ import annotations
++
++import enum
++import math
++import re
++from dataclasses import dataclass, field
++from datetime import datetime, timezone
++from typing import Any, Callable, Mapping, Optional
++
++from strategy_api import (
++    EntrySignalInput,
++    ImmutableMapping,
++    Signal,
++    SignalDirection,
++    Strategy,
++    StrategyConfig,
++    unfreeze,
++    validate_config_hash_format,
++)
++from strategy_state import (
++    StrategyStateManager,
++    validate_figi,
++    validate_strategy_id,
++)
++from attribution import AttributionContext
++
++# ---------------------------------------------------------------------------
++# Ошибки Stage C (fail-closed; самостоятельная иерархия — ошибки Stage A/B
++# не маскируются и не подменяются, а пробрасываются как есть)
++# ---------------------------------------------------------------------------
++
++
++class ContractViolationError(Exception):
++    """Базовая ошибка нарушения контракта Stage C."""
++
++
++class EntryContractViolationError(ContractViolationError):
++    """Некорректный объект/результат контракта входа."""
++
++
++class ExitContractViolationError(ContractViolationError):
++    """Некорректный объект/результат контракта выхода."""
++
++
++class ExitMergeViolationError(ContractViolationError):
++    """Нарушение правил объединения выходов (в т.ч. несогласованная
++    атрибуция объединяемых результатов)."""
++
++
++class PriceDataViolationError(ContractViolationError):
++    """Некорректные данные цены при создании PriceData."""
++
++
++class CoordinatorViolationError(ContractViolationError):
++    """Нарушение контракта использования координатора/раннера
++    (неправильные типы аргументов вызывающего кода)."""
++
++
++# ---------------------------------------------------------------------------
++# Перечисления контрактов
++# ---------------------------------------------------------------------------
++
++
++class EntryOutcome(enum.Enum):
++    """Состояние результата проверки входа (ТЗ Stage C §3.1).
++
++    ENTRY_ALLOWED          — разрешённый вход (единственное состояние,
++                             допускающее вход);
++    NO_SIGNAL              — отсутствие сигнала;
++    ENTRY_FORBIDDEN        — явный запрет входа;
++    DATA_INSUFFICIENT      — недостаточность или некорректность исходных
++                             данных (вход НЕ разрешается);
++    INVALID_STRATEGY_RESULT— некорректный результат стратегии (тип,
++                             атрибуция, направление): вход НЕ разрешается;
++    EVALUATION_ERROR       — ошибка при вычислении (исключение стратегии):
++                             вход НЕ разрешается.
++
++    Ни одно состояние, кроме ENTRY_ALLOWED, не может быть истолковано
++    как разрешение входа (fail-closed, ТЗ §3.1: не допускать неявного
++    разрешения входа при ошибке, отсутствии данных или некорректном
++    результате стратегии).
++    """
++    ENTRY_ALLOWED = "ENTRY_ALLOWED"
++    NO_SIGNAL = "NO_SIGNAL"
++    ENTRY_FORBIDDEN = "ENTRY_FORBIDDEN"
++    DATA_INSUFFICIENT = "DATA_INSUFFICIENT"
++    INVALID_STRATEGY_RESULT = "INVALID_STRATEGY_RESULT"
++    EVALUATION_ERROR = "EVALUATION_ERROR"
++
++
++class ExitOutcome(enum.Enum):
++    """Состояние результата оценки выхода (ТЗ Stage C §3.2).
++
++    STRATEGIC_EXIT      — стратегический выход (источник: STRATEGIC);
++    PROTECTIVE_EXIT     — защитный выход (источник: PROTECTIVE);
++    NO_EXIT             — отсутствие выхода (оценивший слой решил
++                          не выходить);
++    EVALUATION_BLOCKED  — невозможность безопасной оценки выхода
++                          (цена отсутствует/некорректна/устарела или
++                          слой оценки не смог выдать решение);
++                          выход НЕ считается состоявшимся.
++    """
++    STRATEGIC_EXIT = "STRATEGIC_EXIT"
++    PROTECTIVE_EXIT = "PROTECTIVE_EXIT"
++    NO_EXIT = "NO_EXIT"
++    EVALUATION_BLOCKED = "EVALUATION_BLOCKED"
++
++
++class ExitDecisionSource(enum.Enum):
++    """Источник решения выхода (ТЗ Stage C §3.2).
++
++    Стратегический и защитный источники остаются РАЗНЫМИ источниками
++    решений. PRICE_GATE — решение «оценка невозможна» вынесла сама
++    контрактная проверка цены (fail-closed gate), ДО вызова оценщиков.
++    """
++    STRATEGIC = "STRATEGIC"
++    PROTECTIVE = "PROTECTIVE"
++    PRICE_GATE = "PRICE_GATE"
++
++
++class ExitMergeOutcome(enum.Enum):
++    """Итог детерминированного объединения выходов (ТЗ Stage C §3.3).
++
++    PROTECTIVE_EXIT                     — защитный выход (высший
++                                          приоритет; никогда не
++                                          подавляется);
++    STRATEGIC_EXIT                      — стратегический выход при
++                                          защитном NO_EXIT;
++    NO_EXIT                             — оба слоя: выхода нет;
++    INCOMPLETE_PROTECTIVE_EVALUATION    — защитный слой не смог дать
++                                          безопасную оценку: ИТОГОВОЕ
++                                          РЕШЕНИЕ НЕ ВЫНОСИТСЯ
++                                          (fail-closed; информация
++                                          стратегического слоя
++                                          сохраняется в diagnostics);
++    INCOMPLETE_STRATEGIC_EVALUATION     — стратегический слой не смог
++                                          дать безопасную оценку при
++                                          защитном NO_EXIT: итоговое
++                                          решение не выносится;
++    INCOMPLETE_PRICE_EVALUATION         — проверка цены не пройдена ДО
++                                          вызова оценщиков (цена
++                                          отсутствует/некорректна/
++                                          устарела при
++                                          price_required=True либо
++                                          передана некорректная):
++                                          оценщики не вызывались,
++                                          итоговое решение не выносится.
++    """
++    PROTECTIVE_EXIT = "PROTECTIVE_EXIT"
++    STRATEGIC_EXIT = "STRATEGIC_EXIT"
++    NO_EXIT = "NO_EXIT"
++    INCOMPLETE_PROTECTIVE_EVALUATION = "INCOMPLETE_PROTECTIVE_EVALUATION"
++    INCOMPLETE_STRATEGIC_EVALUATION = "INCOMPLETE_STRATEGIC_EVALUATION"
++    INCOMPLETE_PRICE_EVALUATION = "INCOMPLETE_PRICE_EVALUATION"
++
++
++class PriceCheckOutcome(enum.Enum):
++    """Результат проверки цены (ТЗ Stage C §3.4, fail-closed).
++
++    PRICE_OK       — цена пригодна для безопасной оценки выхода;
++    PRICE_MISSING  — цена не передана (когда она требуется);
++    PRICE_INVALID  — цена некорректна (тип, NaN/Infinity, <= 0, чужой
++                     FIGI, метка времени в будущем);
++    PRICE_STALE    — цена устарела относительно явно заданного
++                     максимального возраста.
++    """
++    PRICE_OK = "PRICE_OK"
++    PRICE_MISSING = "PRICE_MISSING"
++    PRICE_INVALID = "PRICE_INVALID"
++    PRICE_STALE = "PRICE_STALE"
++
++
++# ---------------------------------------------------------------------------
++# Общие правила валидации Stage C
++# ---------------------------------------------------------------------------
++
++EXIT_MERGE_RULES_VERSION = "exit_merge_rules_v1"
++
++_REASON_CODE_RE = re.compile(r"^[A-Z][A-Z0-9_]{0,127}$")
++
++
++def _validate_reason_code(value: Any, error: type) -> str:
++    """Код причины: непустая строка [A-Z][A-Z0-9_]* (до 128 символов).
++
++    Машиночитаемый код причины обязателен для каждого результата
++    контракта (ТЗ §3.1–§3.2: «код причины»); диагностика может нести
++    дополнительные человекочитаемые подробности.
++    """
++    if not isinstance(value, str) or not _REASON_CODE_RE.match(value):
++        raise error(
++            "reason_code должен быть непустой строкой вида "
++            f"[A-Z][A-Z0-9_]{{0,127}}; получено {value!r}")
++    return value
++
++
++def _validate_json_value(value: Any, *, _path: str,
++                         error: type) -> Any:
++    """Рекурсивная проверка диагностических данных на JSON-совместимость.
++
++    Та же политика, что и в данных состояния Stage B: None, bool, int,
++    конечный float, str, отображения со строковыми ключами, списки/
++    кортежи; множества нормализуются в отсортированный список.
++    NaN/Infinity и произвольные объекты отклоняются.
++    """
++    if value is None or isinstance(value, bool):
++        return value
++    if isinstance(value, int):
++        return value
++    if isinstance(value, float):
++        if not math.isfinite(value):
++            raise error(
++                f"{_path}: NaN/Infinity в диагностических данных "
++                "недопустимы")
++        return value
++    if isinstance(value, str):
++        return value
++    if isinstance(value, Mapping):
++        result: dict = {}
++        for key, item in value.items():
++            if not isinstance(key, str):
++                raise error(
++                    f"{_path}: ключи диагностических данных должны быть "
++                    f"строками; получен {key!r} ({type(key).__name__})")
++            result[key] = _validate_json_value(
++                item, _path=f"{_path}.{key}", error=error)
++        return result
++    if isinstance(value, (list, tuple)):
++        return [_validate_json_value(item, _path=f"{_path}[{i}]",
++                                     error=error)
++                for i, item in enumerate(value)]
++    if isinstance(value, (set, frozenset)):
++        items = [_validate_json_value(item, _path=f"{_path}{{set}}",
++                                      error=error) for item in value]
++        items.sort(key=lambda item: repr(item))
++        return items
++    raise error(
++        f"{_path}: диагностические данные должны быть JSON-совместимыми "
++        f"(None/bool/int/float/str/Mapping/Sequence); получено "
++        f"{type(value).__name__}")
++
++
++def _normalize_diagnostics(value: Any, *, error: type) -> ImmutableMapping:
++    """Диагностика: None -> пустое отображение; иначе проверка+заморозка."""
++    if value is None:
++        return ImmutableMapping()
++    if not isinstance(value, Mapping):
++        raise error(
++            "диагностические данные должны быть отображением (Mapping); "
++            f"получено {type(value).__name__}")
++    normalized = _validate_json_value(unfreeze(value), _path="diagnostics",
++                                      error=error)
++    return ImmutableMapping(normalized)
++
++
++def _validate_iso_timestamp(value: Any, field_name: str,
++                            error: type) -> datetime:
++    """Метка времени: непустая строка ISO-8601 С часовым поясом.
++
++    Та же политика, что и в Stage B для created_at/updated_at: без
++    часового пояса значение отклоняется (нельзя детерминированно
++    сравнивать наивные и осведомлённые метки).
++    """
++    if not isinstance(value, str) or not value:
++        raise error(
++            f"{field_name} должен быть непустой строкой ISO-8601 "
++            f"с часовым поясом; получено {type(value).__name__}")
++    text = value[:-1] + "+00:00" if value.endswith("Z") else value
++    try:
++        parsed = datetime.fromisoformat(text)
++    except ValueError as exc:
++        raise error(
++            f"{field_name} не читается как ISO-8601: {value!r}") from exc
++    if parsed.tzinfo is None:
++        raise error(
++            f"{field_name} должен содержать часовой пояс: {value!r}")
++    return parsed
++
++
++def _validate_attribution(strategy_id: Any, figi: Any, config_hash: Any,
++                          error: type) -> None:
++    """Проверка тройки атрибуции контракта (strategy_id, FIGI, config_hash).
++
++    strategy_id и FIGI — по правилам Stage B (набор символов, длина);
++    config_hash — по формату Stage A.2 (SHA-256 hexdigest). Ошибки
++    Stage A/B заворачиваются в ошибку Stage C соответствующего
++    контракта (самостоятельная поверхность ошибок Stage C).
++    """
++    if not isinstance(strategy_id, str) or not strategy_id:
++        raise error(
++            "strategy_id контракта должен быть непустой строкой; "
++            f"получено {type(strategy_id).__name__}")
++    try:
++        validate_strategy_id(strategy_id)
++    except Exception as exc:  # StateValidationError и подклассы
++        raise error(
++            f"strategy_id контракта не проходит проверку Stage B: "
++            f"{exc}") from exc
++    if not isinstance(figi, str) or not figi:
++        raise error(
++            "figi контракта должен быть непустой строкой; "
++            f"получено {type(figi).__name__}")
++    try:
++        validate_figi(figi)
++    except Exception as exc:
++        raise error(
++            f"figi контракта не проходит проверку Stage B: {exc}") from exc
++    if not isinstance(config_hash, str) or not config_hash:
++        raise error(
++            "config_hash контракта должен быть непустой строкой; "
++            f"получено {type(config_hash).__name__}")
++    try:
++        validate_config_hash_format(config_hash)
++    except Exception as exc:  # StrategyConfigError (Stage A.2)
++        raise error(
++            f"config_hash контракта не проходит проверку формата "
++            f"Stage A.2: {exc}") from exc
++
++
++def _utc_now_iso() -> str:
++    """Текущее время UTC в фиксированном формате ISO-8601."""
++    return datetime.now(timezone.utc).isoformat(
++        timespec="microseconds").replace("+00:00", "Z")
++
++
++def _validate_utc_datetime(value: Any, field_name: str,
++                           error: type) -> datetime:
++    """Аргумент `now`: осведомлённый datetime (наивный отклоняется)."""
++    if not isinstance(value, datetime) or value.tzinfo is None:
++        raise error(
++            f"{field_name} должен быть datetime с часовым поясом "
++            f"(tz-aware); получено {type(value).__name__}")
++    return value
++
++
++# ---------------------------------------------------------------------------
++# Цена: PriceData и fail-closed проверка (ТЗ Stage C §3.4)
++# ---------------------------------------------------------------------------
++
++
++@dataclass(frozen=True)
++class PriceData:
++    """Типизированная цена с меткой времени и источником.
++
++    Инварианты (fail-closed):
++      * figi — валидный идентификатор инструмента (правила Stage B);
++      * price — конечное число СТРОГО больше нуля; NaN/Infinity/0/отрица-
++        тельные значения отклоняются ПРИ СОЗДАНИИ: нулевая цена не может
++        попасть в контракт ни при каких обстоятельствах (ТЗ §3.4);
++      * timestamp — ISO-8601 с часовым поясом;
++      * source — непустая строка (откуда пришла цена).
++
++    Никакой автоподстановки: недостающая цена представляется
++    ОТСУТСТВИЕМ объекта (None), а не фиктивным значением.
++    """
++    figi: str
++    price: float
++    timestamp: str
++    source: str
++
++    def __post_init__(self) -> None:
++        if not isinstance(self.figi, str) or not self.figi:
++            raise PriceDataViolationError(
++                "PriceData.figi должен быть непустой строкой; "
++                f"получено {type(self.figi).__name__}")
++        try:
++            validate_figi(self.figi)
++        except Exception as exc:
++            raise PriceDataViolationError(
++                f"PriceData.figi не проходит проверку Stage B: {exc}"
++            ) from exc
++        if isinstance(self.price, bool) or \
++                not isinstance(self.price, (int, float)):
++            raise PriceDataViolationError(
++                "PriceData.price должен быть числом (int/float, bool "
++                f"запрещён); получено {type(self.price).__name__}")
++        price = float(self.price)
++        if not math.isfinite(price):
++            raise PriceDataViolationError(
++                "PriceData.price: NaN/Infinity запрещены (некорректная "
++                "цена не может быть сохранена в контракте)")
++        if price <= 0.0:
++            raise PriceDataViolationError(
++                f"PriceData.price должен быть СТРОГО больше нуля; "
++                f"получено {price!r} (нулевая/отрицательная цена "
++                "запрещена, ТЗ Stage C §3.4)")
++        object.__setattr__(self, "price", price)
++        _validate_iso_timestamp(self.timestamp, "PriceData.timestamp",
++                                PriceDataViolationError)
++        if not isinstance(self.source, str) or not self.source.strip():
++            raise PriceDataViolationError(
++                "PriceData.source должен быть непустой строкой "
++                "(откуда пришла цена)")
++
++
++@dataclass(frozen=True)
++class PriceCheckResult:
++    """Типизированный результат проверки цены (ТЗ Stage C §3.4).
++
++    PRICE_OK несёт проверенный PriceData; остальные состояния несут
++    диагностическую причину и НЕ содержат цены (никаких подстановок).
++    """
++    outcome: PriceCheckOutcome
++    reason_code: str
++    diagnostics: ImmutableMapping = field(default_factory=ImmutableMapping)
++    price: Optional[PriceData] = None
++
++    def __post_init__(self) -> None:
++        if type(self.outcome) is not PriceCheckOutcome:
++            raise PriceDataViolationError(
++                "PriceCheckResult.outcome должен быть точным типом "
++                f"PriceCheckOutcome; получено {type(self.outcome).__name__}")
++        _validate_reason_code(self.reason_code, PriceDataViolationError)
++        object.__setattr__(
++            self, "diagnostics",
++            _normalize_diagnostics(self.diagnostics,
++                                   error=PriceDataViolationError))
++        if self.price is not None and type(self.price) is not PriceData:
++            raise PriceDataViolationError(
++                "PriceCheckResult.price принимает только точный тип "
++                f"PriceData или None; получено {type(self.price).__name__}")
++        if (self.outcome is PriceCheckOutcome.PRICE_OK) != \
++                (self.price is not None):
++            raise PriceDataViolationError(
++                "PriceCheckResult: PRICE_OK обязан нести проверенный "
++                "PriceData; остальные состояния — None (никаких "
++                "подстановочных цен)")
++
++
++def check_price(price: Any,
++                *,
++                expected_figi: Any,
++                now: Optional[datetime] = None,
++                max_age_seconds: Optional[float] = None
++                ) -> PriceCheckResult:
++    """Fail-closed проверка цены для оценки выхода (ТЗ Stage C §3.4).
++
++    Правила (все отклонения — типизированный результат, НИКАКИХ
++    подстановок и исключений):
++      * price is None                         -> PRICE_MISSING;
++      * не точный тип PriceData               -> PRICE_INVALID
++                                                 (PRICE_WRONG_TYPE);
++      * price.figi != expected_figi           -> PRICE_INVALID
++                                                 (PRICE_FOREIGN_FIGI):
++                                                 чужая цена не может
++                                                 использоваться;
++      * метка времени в будущем               -> PRICE_INVALID
++                                                 (PRICE_FROM_FUTURE):
++                                                 рассинхрон часов не
++                                                 проходит молча;
++      * max_age_seconds задан и возраст цены
++        превышает его                         -> PRICE_STALE (PRICE_STALE);
++      * иначе                                  -> PRICE_OK с ценой.
++
++    max_age_seconds — ЯВНЫЙ параметр контракта (обязательный ключевой
++    аргумент вызывающей стороны): None означает «проверку устаревания
++    отключили явным решением оператора» и фиксируется в diagnostics;
++    скрытого порога по умолчанию НЕ существует. Последняя известная
++    цена нигде НЕ подставляется — такого механизма в контракте нет.
++
++    now — осведомлённый datetime (по умолчанию текущее время UTC).
++    """
++    validate_figi(expected_figi)
++    now_dt = _validate_utc_datetime(now, "now", PriceDataViolationError) \
++        if now is not None else datetime.now(timezone.utc)
++
++    if price is None:
++        return PriceCheckResult(
++            outcome=PriceCheckOutcome.PRICE_MISSING,
++            reason_code="PRICE_MISSING",
++            diagnostics={
++                "expected_figi": expected_figi,
++                "detail": "цена не передана; подстановка нуля или "
++                          "последней известной цены запрещена "
++                          "(ТЗ Stage C §3.4)",
++            })
++
++    if type(price) is not PriceData:
++        return PriceCheckResult(
++            outcome=PriceCheckOutcome.PRICE_INVALID,
++            reason_code="PRICE_WRONG_TYPE",
++            diagnostics={
++                "expected_figi": expected_figi,
++                "received_type": type(price).__name__,
++                "detail": "цена должна быть точным типом PriceData "
++                          "(подклассы и duck-typing отклоняются)",
++            })
++
++    if price.figi != expected_figi:
++        return PriceCheckResult(
++            outcome=PriceCheckOutcome.PRICE_INVALID,
++            reason_code="PRICE_FOREIGN_FIGI",
++            diagnostics={
++                "expected_figi": expected_figi,
++                "received_figi": price.figi,
++                "detail": "цена принадлежит другому инструменту",
++            })
++
++    try:
++        price_dt = _validate_iso_timestamp(
++            price.timestamp, "price.timestamp", PriceDataViolationError)
++    except PriceDataViolationError as exc:
++        return PriceCheckResult(
++            outcome=PriceCheckOutcome.PRICE_INVALID,
++            reason_code="PRICE_BAD_TIMESTAMP",
++            diagnostics={
++                "expected_figi": expected_figi,
++                "detail": str(exc),
++            })
++
++    age_seconds = (now_dt - price_dt).total_seconds()
++    if age_seconds < 0.0:
++        return PriceCheckResult(
++            outcome=PriceCheckOutcome.PRICE_INVALID,
++            reason_code="PRICE_FROM_FUTURE",
++            diagnostics={
++                "expected_figi": expected_figi,
++                "price_timestamp": price.timestamp,
++                "age_seconds": age_seconds,
++                "detail": "метка времени цены в будущем относительно "
++                          "текущего времени",
++            })
++
++    diagnostics = {
++        "expected_figi": expected_figi,
++        "price_timestamp": price.timestamp,
++        "price_source": price.source,
++        "age_seconds": age_seconds,
++        "max_age_seconds": max_age_seconds,
++    }
++
++    if max_age_seconds is not None:
++        if isinstance(max_age_seconds, bool) or \
++                not isinstance(max_age_seconds, (int, float)) or \
++                not math.isfinite(float(max_age_seconds)) or \
++                max_age_seconds < 0:
++            raise PriceDataViolationError(
++                "max_age_seconds должен быть конечным неотрицательным "
++                f"числом или None; получено {max_age_seconds!r}")
++        if age_seconds > float(max_age_seconds):
++            diagnostics["detail"] = (
++                "цена устарела: возраст превышает явно заданный "
++                "максимальный; подстановка последней известной цены "
++                "запрещена (ТЗ Stage C §3.4)")
++            return PriceCheckResult(
++                outcome=PriceCheckOutcome.PRICE_STALE,
++                reason_code="PRICE_STALE",
++                diagnostics=diagnostics)
++
++    diagnostics["detail"] = "цена прошла fail-closed проверку"
++    return PriceCheckResult(
++        outcome=PriceCheckOutcome.PRICE_OK,
++        reason_code="PRICE_OK",
++        diagnostics=diagnostics,
++        price=price,
++    )
++
++
++# ---------------------------------------------------------------------------
++# КОНТРАКТ ВХОДА (ТЗ Stage C §3.1)
++# ---------------------------------------------------------------------------
++
++
++@dataclass(frozen=True)
++class EntryEvaluation:
++    """Типизированный результат проверки входа (ТЗ Stage C §3.1).
++
++    Однозначно различает: разрешённый вход (ENTRY_ALLOWED), отсутствие
++    сигнала (NO_SIGNAL), запрет входа (ENTRY_FORBIDDEN), недостаточность/
++    некорректность исходных данных (DATA_INSUFFICIENT), некорректный
++    результат стратегии (INVALID_STRATEGY_RESULT) и ошибку оценки
++    (EVALUATION_ERROR).
++
++    Однозначная атрибуция каждого результата: strategy_id, config_hash,
++    FIGI, тип результата, код причины, диагностические данные.
++
++    Неизменяемость: frozen dataclass; diagnostics — ImmutableMapping.
++    Потребители принимают объекты ТОЛЬКО точного типа
++    (validate_entry_evaluation), поэтому подкласс с ослабленной
++    валидацией не проходит границу потребителя.
++    """
++    strategy_id: str
++    config_hash: str
++    figi: str
++    outcome: EntryOutcome
++    reason_code: str
++    diagnostics: ImmutableMapping = field(default_factory=ImmutableMapping)
++
++    def __post_init__(self) -> None:
++        _validate_attribution(self.strategy_id, self.figi, self.config_hash,
++                              EntryContractViolationError)
++        if type(self.outcome) is not EntryOutcome:
++            raise EntryContractViolationError(
++                "EntryEvaluation.outcome должен быть точным типом "
++                f"EntryOutcome; получено {type(self.outcome).__name__}")
++        _validate_reason_code(self.reason_code, EntryContractViolationError)
++        object.__setattr__(
++            self, "diagnostics",
++            _normalize_diagnostics(self.diagnostics,
++                                   error=EntryContractViolationError))
++
++    # --- фабрики явных состояний --------------------------------------------
++
++    @classmethod
++    def allowed(cls, strategy_id: str, config_hash: str, figi: str,
++                reason_code: str,
++                diagnostics: Optional[Mapping] = None) -> "EntryEvaluation":
++        """Единственное состояние, допускающее вход."""
++        return cls(strategy_id=strategy_id, config_hash=config_hash,
++                   figi=figi, outcome=EntryOutcome.ENTRY_ALLOWED,
++                   reason_code=reason_code, diagnostics=diagnostics)
++
++    @classmethod
++    def no_signal(cls, strategy_id: str, config_hash: str, figi: str,
++                  reason_code: str,
++                  diagnostics: Optional[Mapping] = None) -> "EntryEvaluation":
++        """Отсутствие сигнала (вход НЕ разрешается)."""
++        return cls(strategy_id=strategy_id, config_hash=config_hash,
++                   figi=figi, outcome=EntryOutcome.NO_SIGNAL,
++                   reason_code=reason_code, diagnostics=diagnostics)
++
++    @classmethod
++    def forbidden(cls, strategy_id: str, config_hash: str, figi: str,
++                  reason_code: str,
++                  diagnostics: Optional[Mapping] = None) -> "EntryEvaluation":
++        """Явный запрет входа."""
++        return cls(strategy_id=strategy_id, config_hash=config_hash,
++                   figi=figi, outcome=EntryOutcome.ENTRY_FORBIDDEN,
++                   reason_code=reason_code, diagnostics=diagnostics)
++
++    @classmethod
++    def data_insufficient(
++            cls, strategy_id: str, config_hash: str, figi: str,
++            reason_code: str,
++            diagnostics: Optional[Mapping] = None) -> "EntryEvaluation":
++        """Недостаточность/некорректность исходных данных."""
++        return cls(strategy_id=strategy_id, config_hash=config_hash,
++                   figi=figi, outcome=EntryOutcome.DATA_INSUFFICIENT,
++                   reason_code=reason_code, diagnostics=diagnostics)
++
++    @classmethod
++    def invalid_strategy_result(
++            cls, strategy_id: str, config_hash: str, figi: str,
++            reason_code: str,
++            diagnostics: Optional[Mapping] = None) -> "EntryEvaluation":
++        """Некорректный результат стратегии (вход НЕ разрешается)."""
++        return cls(strategy_id=strategy_id, config_hash=config_hash,
++                   figi=figi, outcome=EntryOutcome.INVALID_STRATEGY_RESULT,
++                   reason_code=reason_code, diagnostics=diagnostics)
++
++    @classmethod
++    def evaluation_error(
++            cls, strategy_id: str, config_hash: str, figi: str,
++            reason_code: str,
++            diagnostics: Optional[Mapping] = None) -> "EntryEvaluation":
++        """Ошибка при вычислении (вход НЕ разрешается)."""
++        return cls(strategy_id=strategy_id, config_hash=config_hash,
++                   figi=figi, outcome=EntryOutcome.EVALUATION_ERROR,
++                   reason_code=reason_code, diagnostics=diagnostics)
++
++
++def validate_entry_evaluation(value: Any, *,
++                              expected_strategy_id: Any = None,
++                              expected_config_hash: Any = None,
++                              expected_figi: Any = None) -> EntryEvaluation:
++    """Граница потребителя результата входа (fail-closed).
++
++    Принимает ТОЛЬКО точный тип EntryEvaluation (type(value) is ...):
++    подкласс, duck-typed объект или None отклоняются. При переданных
++    ожидаемых значениях атрибуции — перепроверка совпадения; расхождение
++    strategy_id/config_hash/figi (подмена атрибуции) отклоняется.
++    """
++    if type(value) is not EntryEvaluation:
++        raise EntryContractViolationError(
++            "результат входа должен быть точным типом EntryEvaluation; "
++            f"получено {type(value).__name__} (подклассы и duck-typing "
++            "не допускаются: подкласс не может ослабить валидацию)")
++    if expected_strategy_id is not None and \
++            value.strategy_id != expected_strategy_id:
++        raise EntryContractViolationError(
++            "атрибуция результата входа не совпадает с ожидаемой: "
++            f"strategy_id {value.strategy_id!r} вместо "
++            f"{expected_strategy_id!r} (подмена атрибуции отклоняется)")
++    if expected_config_hash is not None and \
++            value.config_hash != expected_config_hash:
++        raise EntryContractViolationError(
++            "атрибуция результата входа не совпадает с ожидаемой: "
++            f"config_hash {value.config_hash!r} вместо "
++            f"{expected_config_hash!r} (подмена атрибуции отклоняется)")
++    if expected_figi is not None and value.figi != expected_figi:
++        raise EntryContractViolationError(
++            "атрибуция результата входа не совпадает с ожидаемой: "
++            f"figi {value.figi!r} вместо {expected_figi!r}")
++    return value
++
++
++class EntryEvaluationRunner:
++    """Запуск проверки входа с конвертацией ВСЕХ проблем в типизированные
++    результаты (ТЗ Stage C §3.1).
++
++    Гарантии:
++      * при ЛЮБОЙ проблеме (недостающие данные, исключение стратегии,
++        некорректный результат) возвращается явное НЕ-разрешающее
++        состояние — неявное разрешение входа при ошибке невозможно;
++      * ошибки misuse вызывающего кода (неверные типы config/strategy/
++        входного объекта) — контролируемое исключение
++        CoordinatorViolationError (это ошибка программирования, а не
++        торговая ситуация);
++      * смысл контракта Stage A (Strategy.evaluate_entry -> Signal)
++        не меняется: стратегия вызывается как в Stage A, Stage C
++        добавляет типизированную границу результата.
++    """
++
++    def evaluate(self,
++                 *,
++                 strategy: Any,
++                 config: Any,
++                 entry_input: Any) -> EntryEvaluation:
++        # 1. Контракт вызывающего кода: точные типы (misuse — исключение).
++        if type(config) is not StrategyConfig:
++            raise CoordinatorViolationError(
++                "EntryEvaluationRunner.evaluate требует точный тип "
++                f"StrategyConfig; получено {type(config).__name__}")
++        if type(entry_input) is not EntrySignalInput:
++            raise CoordinatorViolationError(
++                "EntryEvaluationRunner.evaluate требует точный тип "
++                f"EntrySignalInput; получено "
++                f"{type(entry_input).__name__}")
++        if not isinstance(strategy, Strategy):
++            raise CoordinatorViolationError(
++                "EntryEvaluationRunner.evaluate требует стратегию "
++                f"контракта Stage A (isinstance Strategy); получено "
++                f"{type(strategy).__name__}")
++        strategy_id = config.strategy_id
++        config_hash = config.config_hash
++
++        # 2. Fail-closed проверка исходных данных -> DATA_INSUFFICIENT.
++        #    Некорректный figi — ошибка ВЫЗЫВАЮЩЕГО кода (маршрутизация
++        #    запроса, а не рыночные данные): fail-fast исключение,
++        #    контракт с недействительным figi не создаётся.
++        try:
++            validate_figi(entry_input.figi)
++        except Exception as exc:
++            raise CoordinatorViolationError(
++                f"figi входных данных не проходит проверку Stage B: "
++                f"{exc}") from exc
++        figi = entry_input.figi
++
++        if entry_input.candles is None:
++            return EntryEvaluation.data_insufficient(
++                strategy_id, config_hash, figi, "CANDLES_MISSING",
++                {"detail": "свечи не переданы; вход не оценивается"})
++
++        last_price = entry_input.last_price
++        if isinstance(last_price, bool) or \
++                not isinstance(last_price, (int, float)) or \
++                not math.isfinite(float(last_price)) or \
++                float(last_price) <= 0.0:
++            return EntryEvaluation.data_insufficient(
++                strategy_id, config_hash, figi, "PRICE_INVALID",
++                {"detail": "last_price отсутствует/некорректен "
++                           "(NaN/Infinity/<=0 не допускаются); нулевая "
++                           "цена не подставляется"})
++
++        # 3. Вызов стратегии Stage A: исключение -> EVALUATION_ERROR.
++        try:
++            signal = strategy.evaluate_entry(entry_input, config)
++        except Exception as exc:  # noqa: BLE001 — конвертация в контракт
++            return EntryEvaluation.evaluation_error(
++                strategy_id, config_hash, figi, "EVALUATOR_RAISED",
++                {"exception_type": type(exc).__name__,
++                 "exception_message": str(exc)[:500],
++                 "detail": "исключение стратегии конвертировано в "
++                           "явное НЕ-разрешающее состояние"})
++
++        # 4. Некорректный результат стратегии -> INVALID_STRATEGY_RESULT.
++        if type(signal) is not Signal:
++            return EntryEvaluation.invalid_strategy_result(
++                strategy_id, config_hash, figi, "RESULT_WRONG_TYPE",
++                {"received_type": type(signal).__name__,
++                 "detail": "стратегия обязана вернуть точный тип "
++                           "Signal (Stage A)"})
++        if signal.strategy_id != strategy_id or \
++                signal.config_hash != config_hash:
++            return EntryEvaluation.invalid_strategy_result(
++                strategy_id, config_hash, figi, "ATTRIBUTION_MISMATCH",
++                {"signal_strategy_id": str(signal.strategy_id),
++                 "signal_config_hash": str(signal.config_hash),
++                 "detail": "атрибуция сигнала не совпадает с конфигурацией: "
++                           "подмена strategy_id/config_hash отклоняется"})
++        if isinstance(signal.figi, str) and signal.figi and \
++                signal.figi != figi:
++            return EntryEvaluation.invalid_strategy_result(
++                strategy_id, config_hash, figi, "FIGI_MISMATCH",
++                {"signal_figi": signal.figi,
++                 "detail": "сигнал принадлежит другому инструменту"})
++
++        # 5. Отображение направления Stage A на состояние контракта входа.
++        direction = signal.direction
++        signal_reason = signal.reason if isinstance(signal.reason, str) \
++            else str(signal.reason)
++        diagnostics = {
++            "signal_reason": signal_reason[:500],
++            "direction": direction.value if isinstance(direction,
++                                                       SignalDirection)
++            else str(direction),
++            "ticker": signal.ticker if isinstance(signal.ticker, str) else "",
++        }
++        if type(direction) is not SignalDirection:
++            return EntryEvaluation.invalid_strategy_result(
++                strategy_id, config_hash, figi, "DIRECTION_UNKNOWN",
++                {"detail": "направление сигнала не является элементом "
++                           "SignalDirection"})
++        if direction is SignalDirection.BUY:
++            return EntryEvaluation.allowed(
++                strategy_id, config_hash, figi, "ENTRY_SIGNAL_BUY",
++                diagnostics)
++        if direction is SignalDirection.HOLD:
++            return EntryEvaluation.no_signal(
++                strategy_id, config_hash, figi, "NO_SIGNAL_HOLD",
++                diagnostics)
++        if direction is SignalDirection.SELL:
++            return EntryEvaluation.forbidden(
++                strategy_id, config_hash, figi, "ENTRY_FORBIDDEN_SELL",
++                diagnostics)
++        return EntryEvaluation.invalid_strategy_result(
++            strategy_id, config_hash, figi, "DIRECTION_UNKNOWN",
++            {"detail": "направление сигнала не входит в контракт входа"})
++
++
++# ---------------------------------------------------------------------------
++# КОНТРАКТ ВЫХОДА (ТЗ Stage C §3.2)
++# ---------------------------------------------------------------------------
++
++
++@dataclass(frozen=True)
++class ExitEvaluation:
++    """Типизированный результат оценки выхода (ТЗ Stage C §3.2).
++
++    Поддерживает: стратегический выход, защитный выход, отсутствие
++    выхода, невозможность безопасной оценки. Стратегический выход и
++    защитный выход остаются РАЗНЫМИ источниками решений (поле
++    decision_source).
++
++    Обязательная атрибуция каждого результата: strategy_id, config_hash,
++    FIGI, источник решения, причина (reason_code), тип выхода (exit_type
++    — только для реальных выходов), диагностические данные и метка
++    решения для последующей обработки.
++
++    Согласованность полей (fail-closed, проверяется при создании):
++      * STRATEGIC_EXIT      <-> decision_source == STRATEGIC;
++      * PROTECTIVE_EXIT     <-> decision_source == PROTECTIVE;
++      * NO_EXIT             <-> decision_source in {STRATEGIC, PROTECTIVE}
++                               (какой слой решил не выходить — известно);
++      * EVALUATION_BLOCKED  <-> decision_source in {PRICE_GATE, STRATEGIC,
++                               PROTECTIVE} (что помешало безопасной
++                               оценке — цена/слой — известно);
++      * exit_type обязателен ТОЛЬКО для реальных выходов и обязан
++        отсутствовать у NO_EXIT / EVALUATION_BLOCKED (несуществующий
++        тип выхода не создаётся).
++    """
++    strategy_id: str
++    config_hash: str
++    figi: str
++    outcome: ExitOutcome
++    decision_source: ExitDecisionSource
++    reason_code: str
++    exit_type: Optional[str] = None
++    decided_at: Optional[str] = None
++    diagnostics: ImmutableMapping = field(default_factory=ImmutableMapping)
++
++    def __post_init__(self) -> None:
++        _validate_attribution(self.strategy_id, self.figi, self.config_hash,
++                              ExitContractViolationError)
++        if type(self.outcome) is not ExitOutcome:
++            raise ExitContractViolationError(
++                "ExitEvaluation.outcome должен быть точным типом "
++                f"ExitOutcome; получено {type(self.outcome).__name__}")
++        if type(self.decision_source) is not ExitDecisionSource:
++            raise ExitContractViolationError(
++                "ExitEvaluation.decision_source должен быть точным типом "
++                "ExitDecisionSource; получено "
++                f"{type(self.decision_source).__name__}")
++        _validate_reason_code(self.reason_code, ExitContractViolationError)
++
++        if self.outcome is ExitOutcome.STRATEGIC_EXIT:
++            if self.decision_source is not ExitDecisionSource.STRATEGIC:
++                raise ExitContractViolationError(
++                    "STRATEGIC_EXIT обязан исходить от источника "
++                    f"STRATEGIC; получено {self.decision_source.value}")
++            if self.exit_type is None:
++                raise ExitContractViolationError(
++                    "реальный выход обязан нести exit_type (тип выхода); "
++                    "None не допускается")
++        elif self.outcome is ExitOutcome.PROTECTIVE_EXIT:
++            if self.decision_source is not ExitDecisionSource.PROTECTIVE:
++                raise ExitContractViolationError(
++                    "PROTECTIVE_EXIT обязан исходить от источника "
++                    f"PROTECTIVE; получено {self.decision_source.value}")
++            if self.exit_type is None:
++                raise ExitContractViolationError(
++                    "реальный выход обязан нести exit_type (тип выхода); "
++                    "None не допускается")
++        elif self.outcome is ExitOutcome.NO_EXIT:
++            if self.decision_source is ExitDecisionSource.PRICE_GATE:
++                raise ExitContractViolationError(
++                    "NO_EXIT обязан исходить от слоя оценки "
++                    "(STRATEGIC или PROTECTIVE), а не от PRICE_GATE")
++            if self.exit_type is not None:
++                raise ExitContractViolationError(
++                    "NO_EXIT не может нести exit_type: несуществующий "
++                    "выход не типизируется")
++        else:  # EVALUATION_BLOCKED
++            if self.exit_type is not None:
++                raise ExitContractViolationError(
++                    "EVALUATION_BLOCKED не может нести exit_type: "
++                    "безопасная оценка не состоялась, выхода нет")
++
++        if self.exit_type is not None:
++            _validate_reason_code(self.exit_type, ExitContractViolationError)
++
++        if self.decided_at is not None:
++            _validate_iso_timestamp(self.decided_at, "decided_at",
++                                    ExitContractViolationError)
++        object.__setattr__(
++            self, "diagnostics",
++            _normalize_diagnostics(self.diagnostics,
++                                   error=ExitContractViolationError))
++
++    # --- фабрики явных состояний --------------------------------------------
++
++    @classmethod
++    def strategic_exit(cls, strategy_id: str, config_hash: str, figi: str,
++                       exit_type: str, reason_code: str,
++                       decided_at: Optional[str] = None,
++                       diagnostics: Optional[Mapping] = None
++                       ) -> "ExitEvaluation":
++        """Стратегический выход (источник: STRATEGIC)."""
++        return cls(strategy_id=strategy_id, config_hash=config_hash,
++                   figi=figi, outcome=ExitOutcome.STRATEGIC_EXIT,
++                   decision_source=ExitDecisionSource.STRATEGIC,
++                   reason_code=reason_code, exit_type=exit_type,
++                   decided_at=decided_at, diagnostics=diagnostics)
++
++    @classmethod
++    def protective_exit(cls, strategy_id: str, config_hash: str, figi: str,
++                        exit_type: str, reason_code: str,
++                        decided_at: Optional[str] = None,
++                        diagnostics: Optional[Mapping] = None
++                        ) -> "ExitEvaluation":
++        """Защитный выход (источник: PROTECTIVE)."""
++        return cls(strategy_id=strategy_id, config_hash=config_hash,
++                   figi=figi, outcome=ExitOutcome.PROTECTIVE_EXIT,
++                   decision_source=ExitDecisionSource.PROTECTIVE,
++                   reason_code=reason_code, exit_type=exit_type,
++                   decided_at=decided_at, diagnostics=diagnostics)
++
++    @classmethod
++    def no_exit(cls, strategy_id: str, config_hash: str, figi: str,
++                decision_source: ExitDecisionSource, reason_code: str,
++                decided_at: Optional[str] = None,
++                diagnostics: Optional[Mapping] = None) -> "ExitEvaluation":
++        """Отсутствие выхода: слой оценил и решил не выходить."""
++        return cls(strategy_id=strategy_id, config_hash=config_hash,
++                   figi=figi, outcome=ExitOutcome.NO_EXIT,
++                   decision_source=decision_source, reason_code=reason_code,
++                   exit_type=None, decided_at=decided_at,
++                   diagnostics=diagnostics)
++
++    @classmethod
++    def evaluation_blocked(cls, strategy_id: str, config_hash: str,
++                           figi: str,
++                           decision_source: ExitDecisionSource,
++                           reason_code: str,
++                           decided_at: Optional[str] = None,
++                           diagnostics: Optional[Mapping] = None
++                           ) -> "ExitEvaluation":
++        """Невозможность безопасной оценки выхода (fail-closed).
++
++        Выход НЕ считается состоявшимся; состояние НЕ изменяется «как
++        будто выход состоялся» (ТЗ Stage C §3.4).
++        """
++        return cls(strategy_id=strategy_id, config_hash=config_hash,
++                   figi=figi, outcome=ExitOutcome.EVALUATION_BLOCKED,
++                   decision_source=decision_source, reason_code=reason_code,
++                   exit_type=None, decided_at=decided_at,
++                   diagnostics=diagnostics)
++
++
++def validate_exit_evaluation(value: Any, *,
++                             expected_strategy_id: Any = None,
++                             expected_config_hash: Any = None,
++                             expected_figi: Any = None) -> ExitEvaluation:
++    """Граница потребителя результата выхода (fail-closed).
++
++    Принимает ТОЛЬКО точный тип ExitEvaluation; при переданных
++    ожидаемых значениях атрибуции — перепроверка совпадения (подмена
++    strategy_id/config_hash/figi отклоняется).
++    """
++    if type(value) is not ExitEvaluation:
++        raise ExitContractViolationError(
++            "результат выхода должен быть точным типом ExitEvaluation; "
++            f"получено {type(value).__name__} (подклассы и duck-typing "
++            "не допускаются)")
++    if expected_strategy_id is not None and \
++            value.strategy_id != expected_strategy_id:
++        raise ExitContractViolationError(
++            "атрибуция результата выхода не совпадает с ожидаемой: "
++            f"strategy_id {value.strategy_id!r} вместо "
++            f"{expected_strategy_id!r}")
++    if expected_config_hash is not None and \
++            value.config_hash != expected_config_hash:
++        raise ExitContractViolationError(
++            "атрибуция результата выхода не совпадает с ожидаемой: "
++            f"config_hash {value.config_hash!r} вместо "
++            f"{expected_config_hash!r}")
++    if expected_figi is not None and value.figi != expected_figi:
++        raise ExitContractViolationError(
++            "атрибуция результата выхода не совпадает с ожидаемой: "
++            f"figi {value.figi!r} вместо {expected_figi!r}")
++    return value
++
++
++@dataclass(frozen=True)
++class ExitEvaluationRequest:
++    """Типизированный запрос оценки выхода к слою стратегии.
++
++    Содержит ТОЛЬКО проверенные значения: атрибуция проверена, данные
++    состояния — ImmutableMapping JSON-совместимых значений (из
++    StrategyState Stage B.1), цена — уже прошедшая fail-closed проверку
++    PriceData (или None). Некорректные значения не могут попасть в
++    запрос: __post_init__ отклоняет их при создании.
++    """
++    strategy_id: str
++    config_hash: str
++    figi: str
++    state_data: ImmutableMapping = field(default_factory=ImmutableMapping)
++    price: Optional[PriceData] = None
++
++    def __post_init__(self) -> None:
++        _validate_attribution(self.strategy_id, self.figi, self.config_hash,
++                              ExitContractViolationError)
++        if not isinstance(self.state_data, Mapping):
++            raise ExitContractViolationError(
++                "ExitEvaluationRequest.state_data должен быть "
++                f"отображением; получено {type(self.state_data).__name__}")
++        normalized = _validate_json_value(
++            unfreeze(self.state_data), _path="state_data",
++            error=ExitContractViolationError)
++        object.__setattr__(self, "state_data", ImmutableMapping(normalized))
++        if self.price is not None and type(self.price) is not PriceData:
++            raise ExitContractViolationError(
++                "ExitEvaluationRequest.price принимает только точный тип "
++                f"PriceData или None; получено {type(self.price).__name__}")
++
++
++# ---------------------------------------------------------------------------
++# ДЕТЕРМИНИРОВАННОЕ ОБЪЕДИНЕНИЕ ВЫХОДОВ (ТЗ Stage C §3.3)
++# ---------------------------------------------------------------------------
++
++# Явные правила приоритета (таблица истинности; protective-major):
++#
++#   защитный \ стратегический | STRATEGIC_EXIT | NO_EXIT | EVALUATION_BLOCKED
++#   --------------------------+----------------+---------+-------------------
++#   PROTECTIVE_EXIT           | PROTECTIVE_EXIT| PROTECTIVE_EXIT | PROTECTIVE_EXIT
++#   NO_EXIT                   | STRATEGIC_EXIT | NO_EXIT | INCOMPLETE_STRATEGIC_EVALUATION
++#   EVALUATION_BLOCKED        | INCOMPLETE_PROTECTIVE_EVALUATION (все случаи)
++#
++# Свойства (ТЗ §3.3):
++#   * защитный выход нельзя потерять: PROTECTIVE_EXIT побеждает во ВСЕХ
++#     случаях;
++#   * стратегический выход не может отменить или подавить защитный:
++#     при двух выходах побеждает ЗАЩИТНЫЙ, стратегическая информация
++#     сохраняется в diagnostics (note=PROTECTIVE_PRIORITY_OVER_STRATEGIC_EXIT);
++#   * отсутствие стратегического выхода не отменяет защитный;
++#   * конфликтующие результаты обрабатываются по таблице выше
++#     (заранее определённые правила, никакой скрытой приоритетности);
++#   * итог сохраняет источник и причину решения;
++#   * одинаковые входы всегда дают одинаковый итог: merge — ЧИСТАЯ
++#     функция (без времени, без случайности, без обращения к состоянию).
++
++
++@dataclass(frozen=True)
++class ExitMergeResult:
++    """Детерминированный итог объединения стратегического и защитного
++    выходов (ТЗ Stage C §3.3).
++
++    Сохраняет источник и причину решения: для реальных выходов —
++    decision_source/reason_code/exit_type победившего решения; для
++    NO_EXIT — причина согласия слоёв; для INCOMPLETE_* — причина
++    незавершённости оценки. Полные сведения обоих входов — в
++    diagnostics (ничего не теряется молча).
++
++    Инварианты:
++      * reason_code — ВСЕГДА непустой код (итог без причины запрещён);
++      * decision_source задан ТОЛЬКО у реальных итоговых выходов;
++      * exit_type задан ТОЛЬКО у реальных итоговых выходов;
++      * equality по содержимому: одинаковые входы -> равные результаты
++        (детерминированность проверяется тестами).
++    """
++    strategy_id: str
++    config_hash: str
++    figi: str
++    final_outcome: ExitMergeOutcome
++    reason_code: str
++    decision_source: Optional[ExitDecisionSource] = None
++    exit_type: Optional[str] = None
++    diagnostics: ImmutableMapping = field(default_factory=ImmutableMapping)
++
++    def __post_init__(self) -> None:
++        _validate_attribution(self.strategy_id, self.figi, self.config_hash,
++                              ExitMergeViolationError)
++        if type(self.final_outcome) is not ExitMergeOutcome:
++            raise ExitMergeViolationError(
++                "ExitMergeResult.final_outcome должен быть точным типом "
++                "ExitMergeOutcome; получено "
++                f"{type(self.final_outcome).__name__}")
++        _validate_reason_code(self.reason_code, ExitMergeViolationError)
++
++        if self.final_outcome is ExitMergeOutcome.PROTECTIVE_EXIT:
++            if self.decision_source is not ExitDecisionSource.PROTECTIVE:
++                raise ExitMergeViolationError(
++                    "итог PROTECTIVE_EXIT обязан нести источник "
++                    f"PROTECTIVE; получено {self.decision_source}")
++            if self.exit_type is None:
++                raise ExitMergeViolationError(
++                    "итог PROTECTIVE_EXIT обязан нести exit_type")
++        elif self.final_outcome is ExitMergeOutcome.STRATEGIC_EXIT:
++            if self.decision_source is not ExitDecisionSource.STRATEGIC:
++                raise ExitMergeViolationError(
++                    "итог STRATEGIC_EXIT обязан нести источник "
++                    f"STRATEGIC; получено {self.decision_source}")
++            if self.exit_type is None:
++                raise ExitMergeViolationError(
++                    "итог STRATEGIC_EXIT обязан нести exit_type")
++        else:
++            if self.decision_source is not None:
++                raise ExitMergeViolationError(
++                    f"итог {self.final_outcome.value} не является "
++                    "исполнимым решением и не может нести "
++                    f"decision_source; получено {self.decision_source}")
++            if self.exit_type is not None:
++                raise ExitMergeViolationError(
++                    f"итог {self.final_outcome.value} не является "
++                    "исполнимым решением и не может нести exit_type")
++
++        object.__setattr__(
++            self, "diagnostics",
++            _normalize_diagnostics(self.diagnostics,
++                                   error=ExitMergeViolationError))
++
++
++def _merge_input_summary(result: ExitEvaluation) -> dict:
++    """JSON-сводка входа объединения (ничего не теряется молча)."""
++    return {
++        "outcome": result.outcome.value,
++        "decision_source": result.decision_source.value,
++        "reason_code": result.reason_code,
++        "exit_type": result.exit_type,
++    }
++
++
++def merge_exit_evaluations(strategic: Any,
++                           protective: Any) -> ExitMergeResult:
++    """Детерминированное объединение стратегического и защитного выходов.
++
++    ЧИСТАЯ функция: одинаковые входные результаты всегда дают одинаковый
++    итог (без времени, случайности, обращения к состоянию — ТЗ §3.3).
++
++    Оба входа обязаны быть точного типа ExitEvaluation и согласованными
++    по атрибуции (strategy_id, config_hash, figi попарно равны) —
++    объединение результатов разных стратегий/конфигураций/инструментов
++    запрещено. ВСЕ нарушения входа объединения дают единый тип ошибки
++    ExitMergeViolationError (единая поверхность ошибок merge).
++
++    Правила приоритета — таблица истинности EXIT_MERGE_RULES_VERSION
++    (см. выше): защитный выход побеждает всегда; стратегический выход
++    проходит только при защитном NO_EXIT; незавершённая оценка любого
++    слоя подавляет ИСПОЛНИМЫЙ итог (fail-closed: итоговое решение не
++    выносится), при этом информация обоих входов сохраняется в
++    diagnostics.
++    """
++    try:
++        validate_exit_evaluation(strategic)
++        validate_exit_evaluation(protective)
++    except ExitContractViolationError as exc:
++        raise ExitMergeViolationError(
++            "объединение запрещено: некорректный вход объединения "
++            f"(ожидается точный тип ExitEvaluation): {exc}") from exc
++
++    if (strategic.strategy_id, strategic.config_hash, strategic.figi) != \
++            (protective.strategy_id, protective.config_hash,
++             protective.figi):
++        raise ExitMergeViolationError(
++            "объединение запрещено: атрибуция стратегического и "
++            "защитного результатов не совпадает — "
++            f"strategic=({strategic.strategy_id!r}, "
++            f"{strategic.config_hash[:8]}..., {strategic.figi!r}), "
++            f"protective=({protective.strategy_id!r}, "
++            f"{protective.config_hash[:8]}..., {protective.figi!r}); "
++            "результаты разных стратегий/конфигураций/инструментов не "
++            "объединяются")
++
++    base_diagnostics = {
++        "merge_rules_version": EXIT_MERGE_RULES_VERSION,
++        "strategic": _merge_input_summary(strategic),
++        "protective": _merge_input_summary(protective),
++    }
++
++    if protective.outcome is ExitOutcome.PROTECTIVE_EXIT:
++        diagnostics = dict(base_diagnostics)
++        if strategic.outcome is ExitOutcome.STRATEGIC_EXIT:
++            diagnostics["note"] = "PROTECTIVE_PRIORITY_OVER_STRATEGIC_EXIT"
++        elif strategic.outcome is ExitOutcome.EVALUATION_BLOCKED:
++            diagnostics["note"] = \
++                "PROTECTIVE_EXIT_WITH_STRATEGIC_EVALUATION_BLOCKED"
++        return ExitMergeResult(
++            strategy_id=strategic.strategy_id,
++            config_hash=strategic.config_hash,
++            figi=strategic.figi,
++            final_outcome=ExitMergeOutcome.PROTECTIVE_EXIT,
++            reason_code=protective.reason_code,
++            decision_source=ExitDecisionSource.PROTECTIVE,
++            exit_type=protective.exit_type,
++            diagnostics=diagnostics)
++
++    if protective.outcome is ExitOutcome.NO_EXIT:
++        if strategic.outcome is ExitOutcome.STRATEGIC_EXIT:
++            return ExitMergeResult(
++                strategy_id=strategic.strategy_id,
++                config_hash=strategic.config_hash,
++                figi=strategic.figi,
++                final_outcome=ExitMergeOutcome.STRATEGIC_EXIT,
++                reason_code=strategic.reason_code,
++                decision_source=ExitDecisionSource.STRATEGIC,
++                exit_type=strategic.exit_type,
++                diagnostics=base_diagnostics)
++        if strategic.outcome is ExitOutcome.NO_EXIT:
++            return ExitMergeResult(
++                strategy_id=strategic.strategy_id,
++                config_hash=strategic.config_hash,
++                figi=strategic.figi,
++                final_outcome=ExitMergeOutcome.NO_EXIT,
++                reason_code="NO_EXIT_CONFIRMED",
++                diagnostics=base_diagnostics)
++        # Стратегический слой не смог дать безопасную оценку при
++        # защитном NO_EXIT: итоговое решение не выносится (fail-closed).
++        return ExitMergeResult(
++            strategy_id=strategic.strategy_id,
++            config_hash=strategic.config_hash,
++            figi=strategic.figi,
++            final_outcome=ExitMergeOutcome.INCOMPLETE_STRATEGIC_EVALUATION,
++            reason_code=strategic.reason_code,
++            diagnostics=base_diagnostics)
++
++    # Защитный слой не смог дать безопасную оценку: исполнимый итог
++    # не выносится при ЛЮБОМ стратегическом результате (fail-closed);
++    # информация стратегического слоя сохраняется в diagnostics.
++    return ExitMergeResult(
++        strategy_id=strategic.strategy_id,
++        config_hash=strategic.config_hash,
++        figi=strategic.figi,
++        final_outcome=ExitMergeOutcome.INCOMPLETE_PROTECTIVE_EVALUATION,
++        reason_code=protective.reason_code,
++        diagnostics=base_diagnostics)
++
++
++# ---------------------------------------------------------------------------
++# КООРДИНАТОР ВЫХОДОВ: интеграция со Stage B.1 (ТЗ Stage C §3.4–§3.5)
++# ---------------------------------------------------------------------------
++
++
++@dataclass(frozen=True)
++class ExitDecisionReport:
++    """Полный типизированный отчёт одного цикла оценки выхода.
++
++    Содержит результат проверки цены, результаты обоих слоёв (None —
++    если слой НЕ вызывался: при блокировке до вызова оценщиков), итог
++    объединения и признак записи в состояние. Отчёт — контрактный
++    объект, а не команда исполнения: он НЕ создаёт заявок и НЕ меняет
++    исполнение (граница Stage C).
++    """
++    strategy_id: str
++    config_hash: str
++    figi: str
++    price_check: PriceCheckResult
++    merged: ExitMergeResult
++    strategic_result: Optional[ExitEvaluation] = None
++    protective_result: Optional[ExitEvaluation] = None
++    state_updated: bool = False
++    decided_at: str = ""
++
++    def __post_init__(self) -> None:
++        _validate_attribution(self.strategy_id, self.figi, self.config_hash,
++                              ExitContractViolationError)
++        if type(self.price_check) is not PriceCheckResult:
++            raise ExitContractViolationError(
++                "ExitDecisionReport.price_check должен быть точным типом "
++                f"PriceCheckResult; получено {type(self.price_check).__name__}")
++        if type(self.merged) is not ExitMergeResult:
++            raise ExitContractViolationError(
++                "ExitDecisionReport.merged должен быть точным типом "
++                f"ExitMergeResult; получено {type(self.merged).__name__}")
++        for name, value in (("strategic_result", self.strategic_result),
++                            ("protective_result", self.protective_result)):
++            if value is not None and type(value) is not ExitEvaluation:
++                raise ExitContractViolationError(
++                    f"ExitDecisionReport.{name} должен быть точным типом "
++                    f"ExitEvaluation или None; получено "
++                    f"{type(value).__name__}")
++        if not isinstance(self.state_updated, bool):
++            raise ExitContractViolationError(
++                "ExitDecisionReport.state_updated должен быть bool")
++        if self.decided_at:
++            _validate_iso_timestamp(self.decided_at, "decided_at",
++                                    ExitContractViolationError)
++        else:
++            raise ExitContractViolationError(
++                "ExitDecisionReport.decided_at обязателен")
++
++        evaluators_called = self.strategic_result is not None and \
++            self.protective_result is not None
++        if evaluators_called:
++            # Атрибуция отчёта обязана совпадать с результатами слоёв.
++            for name, value in (("strategic_result", self.strategic_result),
++                                ("protective_result",
++                                 self.protective_result)):
++                if (value.strategy_id, value.config_hash, value.figi) != \
++                        (self.strategy_id, self.config_hash, self.figi):
++                    raise ExitContractViolationError(
++                        f"атрибуция {name} не совпадает с атрибуцией "
++                        "отчёта: подмена strategy_id/config_hash/figi "
++                        "отклоняется")
++            if self.merged.final_outcome is \
++                    ExitMergeOutcome.INCOMPLETE_PRICE_EVALUATION:
++                raise ExitContractViolationError(
++                    "INCOMPLETE_PRICE_EVALUATION не может быть итогом при "
++                    "вызванных оценщиках")
++        else:
++            if self.strategic_result is not None or \
++                    self.protective_result is not None:
++                raise ExitContractViolationError(
++                    "оба слоя обязаны быть либо вызваны (оба результата "
++                    "заданы), либо не вызваны (оба None): частичный вызов "
++                    "запрещён")
++            if self.merged.final_outcome is not \
++                    ExitMergeOutcome.INCOMPLETE_PRICE_EVALUATION:
++                raise ExitContractViolationError(
++                    "если оценщики не вызывались, итог обязан быть "
++                    "INCOMPLETE_PRICE_EVALUATION; получено "
++                    f"{self.merged.final_outcome.value}")
++
++
++class ExitDecisionCoordinator:
++    """Координатор выхода: цена -> оценщики -> объединение -> состояние.
++
++    Интеграция со Stage B.1 (ТЗ Stage C §3.5):
++      * состояние изолировано по (strategy_id, FIGI): все операции идут
++        через StrategyStateManager (точный тип), который выдаёт ТОЛЬКО
++        состояние запрошенной пары;
++      * config_hash проверяется: конфиг принимается ТОЛЬКО точного типа
++        StrategyConfig; AttributionContext.from_config ПЕРЕПРОВЕРЯЕТ
++        config_hash ИСХОДНЫМ алгоритмом Stage A.2.1 по фактическим
++        параметрам (подмена хеша отклоняется ДО любой оценки);
++        несовпадение config_hash сохранённого состояния —
++        StateConfigMismatchError из Stage B.1 (без автопереноса);
++      * глобальное изменяемое состояние НЕ используется; вторая система
++        хранения НЕ создаётся (только StateStore через менеджер);
++      * обновления состояния выполняются ТОЛЬКО через существующий
++        атомарный API manager.update_state (атомарный read-modify-write
++        Stage B.1); ошибки состояния пробрасываются как есть (не
++        маскируются пустыми значениями).
++
++    Fail-closed цена (ТЗ §3.4):
++      * price_required=True и цена отсутствует/некорректна/устарела —
++        оценщики НЕ вызываются, состояние НЕ изменяется, возвращается
++        отчёт с итогом INCOMPLETE_PRICE_EVALUATION и диагностикой;
++      * нулевая цена не подставляется; последняя известная цена не
++        используется (механизма подстановки НЕ существует);
++      * если цена НЕ требуется (price_required=False), но ПЕРЕДАНА
++        некорректная/устаревшая цена — она не дойдёт до оценщиков:
++        fail-closed блокировка (мусорные данные не проходят молча).
++
++    Запись в состояние:
++      * при ИСПОЛНИМОМ итоге (PROTECTIVE_EXIT / STRATEGIC_EXIT / NO_EXIT)
++        в данные состояния пары через атомарный updater записывается
++        ключ "last_exit_evaluation" (типизированная сводка решения);
++      * при INCOMPLETE_* состояние НЕ изменяется вовсе (нельзя менять
++        состояние так, будто выход состоялся, — ТЗ §3.4);
++      * это запись КОНТРАКТНОГО решения, а не исполнение: заявок нет.
++    """
++
++    STATE_EXIT_EVALUATION_KEY = "last_exit_evaluation"
++
++    def __init__(self,
++                 *,
++                 manager: Any,
++                 strategic_evaluator: Any,
++                 protective_evaluator: Any,
++                 clock: Optional[Callable[[], str]] = None) -> None:
++        if type(manager) is not StrategyStateManager:
++            raise CoordinatorViolationError(
++                "ExitDecisionCoordinator требует точный тип "
++                f"StrategyStateManager (Stage B.1); получено "
++                f"{type(manager).__name__}")
++        for name, evaluator in (("strategic_evaluator", strategic_evaluator),
++                                ("protective_evaluator",
++                                 protective_evaluator)):
++            method = getattr(evaluator, "evaluate_exit", None)
++            if not callable(method):
++                raise CoordinatorViolationError(
++                    f"{name} обязан предоставлять вызываемый метод "
++                    "evaluate_exit(request) -> ExitEvaluation; получено "
++                    f"{type(evaluator).__name__}")
++        self._manager = manager
++        self._strategic_evaluator = strategic_evaluator
++        self._protective_evaluator = protective_evaluator
++        self._clock = clock or _utc_now_iso
++
++    # --- внутренние операции --------------------------------------------------
++
++    def _call_evaluator(self,
++                        evaluator: Any,
++                        source: ExitDecisionSource,
++                        request: ExitEvaluationRequest,
++                        decided_at: str) -> ExitEvaluation:
++        """Вызов одного оценщика с конвертацией ВСЕХ проблем в типизиро-
++        ванный fail-closed результат ЕГО источника.
++
++        Граница безопасности — ПРОВЕРКА РЕЗУЛЬТАТА, а не тип оценщика:
++        подкласс не может провести некорректный результат дальше.
++        Исключение оценщика или некорректный/чужой результат
++        конвертируются в EVALUATION_BLOCKED этого источника (выход не
++        создаётся, ничего не исполняется).
++        """
++        strategy_id = request.strategy_id
++        config_hash = request.config_hash
++        figi = request.figi
++        try:
++            result = evaluator.evaluate_exit(request)
++        except Exception as exc:  # noqa: BLE001 — конвертация в контракт
++            return ExitEvaluation.evaluation_blocked(
++                strategy_id, config_hash, figi, source,
++                "EVALUATOR_RAISED",
++                decided_at=decided_at,
++                diagnostics={
++                    "exception_type": type(exc).__name__,
++                    "exception_message": str(exc)[:500],
++                    "layer": source.value,
++                    "detail": "исключение оценщика конвертировано в "
++                              "явную невозможность безопасной оценки",
++                })
++        try:
++            validate_exit_evaluation(
++                result,
++                expected_strategy_id=strategy_id,
++                expected_config_hash=config_hash,
++                expected_figi=figi,
++            )
++        except ExitContractViolationError as exc:
++            return ExitEvaluation.evaluation_blocked(
++                strategy_id, config_hash, figi, source,
++                "INVALID_EVALUATOR_RESULT",
++                decided_at=decided_at,
++                diagnostics={
++                    "received_type": type(result).__name__,
++                    "detail": str(exc)[:500],
++                    "layer": source.value,
++                })
++        return result
++
++    def _record_exit_evaluation(self,
++                                strategy_id: str,
++                                config_hash: str,
++                                figi: str,
++                                merged: ExitMergeResult,
++                                decided_at: str) -> None:
++        """Запись КОНТРАКТНОГО решения в состояние через АТОМАРНЫЙ API
++        Stage B.1 (manager.update_state, read-modify-write под замком
++        хранилища).
++
++        Ошибки состояния НЕ маскируются: пробрасываются как есть.
++        Запись содержит сводку решения и полную атрибуцию; она НЕ
++        является исполнением и не создаёт заявок.
++        """
++        record = {
++            "outcome": merged.final_outcome.value,
++            "decision_source": merged.decision_source.value
++            if merged.decision_source is not None else None,
++            "reason_code": merged.reason_code,
++            "exit_type": merged.exit_type,
++            "merge_rules_version": EXIT_MERGE_RULES_VERSION,
++            "strategy_id": strategy_id,
++            "config_hash": config_hash,
++            "figi": figi,
++            "decided_at": decided_at,
++        }
++
++        def _updater(current) -> Mapping[str, Any]:
++            data = unfreeze(current.data)
++            data[self.STATE_EXIT_EVALUATION_KEY] = record
++            return data
++
++        self._manager.update_state(
++            strategy_id, figi,
++            config_hash=config_hash,
++            updater=_updater,
++            now=decided_at,
++        )
++
++    # --- основной цикл ----------------------------------------------------------
++
++    def evaluate_and_record(self,
++                            *,
++                            config: Any,
++                            figi: Any,
++                            price_required: bool,
++                            price_max_age_seconds: Optional[float],
++                            price: Any = None,
++                            now: Optional[datetime] = None
++                            ) -> ExitDecisionReport:
++        """Один цикл: проверка цены -> два оценщика -> merge -> состояние.
++
++        price_required и price_max_age_seconds — ЯВНЫЕ обязательные
++        параметры (скрытых умолчаний для торговых решений нет, ТЗ §5):
++        None для price_max_age_seconds означает отключённую проверку
++        устаревания явным решением оператора.
++        """
++        # 1. Контракт вызывающего кода (misuse — исключение).
++        if type(config) is not StrategyConfig:
++            raise CoordinatorViolationError(
++                "ExitDecisionCoordinator требует точный тип StrategyConfig"
++                f"; получено {type(config).__name__}")
++        if not isinstance(price_required, bool):
++            raise CoordinatorViolationError(
++                "price_required должен быть bool (явное решение; скрытых "
++                "умолчаний для торговых решений нет)")
++        if price_max_age_seconds is not None:
++            if isinstance(price_max_age_seconds, bool) or \
++                    not isinstance(price_max_age_seconds, (int, float)) or \
++                    not math.isfinite(float(price_max_age_seconds)) or \
++                    price_max_age_seconds < 0:
++                raise CoordinatorViolationError(
++                    "price_max_age_seconds должен быть конечным "
++                    f"неотрицательным числом или None; получено "
++                    f"{price_max_age_seconds!r}")
++        try:
++            validate_figi(figi)
++        except Exception as exc:
++            raise CoordinatorViolationError(
++                f"figi не проходит проверку Stage B: {exc}") from exc
++
++        # 2. Проверенная атрибуция: config_hash перепроверяется ИСХОДНЫМ
++        #    алгоритмом Stage A.2.1 (AttributionContext.from_config) —
++        #    подмена config_hash отклоняется ДО любой оценки.
++        try:
++            AttributionContext.from_config(config)
++        except Exception as exc:  # AttributionError (Stage A.2.1)
++            raise CoordinatorViolationError(
++                "конфигурация не прошла проверку атрибуции Stage A.2.1 "
++                f"(config_hash против фактических параметров): {exc}"
++            ) from exc
++        strategy_id = config.strategy_id
++        config_hash = config.config_hash
++
++        now_dt = _validate_utc_datetime(now, "now",
++                                        CoordinatorViolationError) \
++            if now is not None else datetime.now(timezone.utc)
++        decided_at = self._clock()
++
++        # 3. Чтение состояния пары через менеджер Stage B.1 (изоляция по
++        #    ключу; несовпадение config_hash — StateConfigMismatchError).
++        state = self._manager.get_state(
++            strategy_id, figi, config_hash=config_hash)
++
++        # 4. Fail-closed проверка цены ДО вызова оценщиков.
++        price_check = check_price(
++            price, expected_figi=figi, now=now_dt,
++            max_age_seconds=price_max_age_seconds)
++
++        blocked_before_evaluators = (
++            (price_required and
++             price_check.outcome is not PriceCheckOutcome.PRICE_OK)
++            or (not price_required and price_check.outcome is
++                PriceCheckOutcome.PRICE_INVALID)
++            or (not price_required and price_check.outcome is
++                PriceCheckOutcome.PRICE_STALE))
++
++        if blocked_before_evaluators:
++            # ТЗ §3.4: отдельный типизированный результат невозможности
++            # безопасной оценки. Оценщики НЕ вызываются, состояние НЕ
++            # изменяется, фиктивный выход не создаётся.
++            price_diagnostics = dict(price_check.diagnostics.to_mutable())
++            price_diagnostics["evaluators_called"] = False
++            price_diagnostics["price_required"] = price_required
++            price_diagnostics["detail"] = \
++                (price_diagnostics.get("detail") or "") + \
++                "; выход не оценивался: безопасная оценка цены " \
++                "невозможна, состояние не изменяется"
++            merged = ExitMergeResult(
++                strategy_id=strategy_id,
++                config_hash=config_hash,
++                figi=figi,
++                final_outcome=ExitMergeOutcome.INCOMPLETE_PRICE_EVALUATION,
++                reason_code=price_check.reason_code,
++                diagnostics=price_diagnostics)
++            return ExitDecisionReport(
++                strategy_id=strategy_id,
++                config_hash=config_hash,
++                figi=figi,
++                price_check=price_check,
++                merged=merged,
++                strategic_result=None,
++                protective_result=None,
++                state_updated=False,
++                decided_at=decided_at,
++            )
++
++        # 5. Запрос оценщикам: только проверенные значения; данные
++        #    состояния пары — как есть (ImmutableMapping).
++        request = ExitEvaluationRequest(
++            strategy_id=strategy_id,
++            config_hash=config_hash,
++            figi=figi,
++            state_data=state.data,
++            price=price_check.price,
++        )
++        strategic_result = self._call_evaluator(
++            self._strategic_evaluator, ExitDecisionSource.STRATEGIC,
++            request, decided_at)
++        protective_result = self._call_evaluator(
++            self._protective_evaluator, ExitDecisionSource.PROTECTIVE,
++            request, decided_at)
++
++        # 6. Детерминированное объединение (защитный приоритет).
++        merged = merge_exit_evaluations(strategic_result, protective_result)
++
++        # 7. Запись в состояние ТОЛЬКО при исполнимом итоге; при
++        #    INCOMPLETE_* состояние не изменяется вовсе.
++        state_updated = False
++        if merged.final_outcome in (
++                ExitMergeOutcome.PROTECTIVE_EXIT,
++                ExitMergeOutcome.STRATEGIC_EXIT,
++                ExitMergeOutcome.NO_EXIT,
++        ):
++            self._record_exit_evaluation(
++                strategy_id, config_hash, figi, merged, decided_at)
++            state_updated = True
++
++        return ExitDecisionReport(
++            strategy_id=strategy_id,
++            config_hash=config_hash,
++            figi=figi,
++            price_check=price_check,
++            merged=merged,
++            strategic_result=strategic_result,
++            protective_result=protective_result,
++            state_updated=state_updated,
++            decided_at=decided_at,
++        )
+```
+
+### candidate/tests/test_stage_c_contracts.py
+Тесты Stage C (контракты): 91 тест — состояния Entry/Exit контрактов, отклонение некорректных результатов (в т.ч. подклассов), правила объединения, детерминированность, конфликтные причины, fail-closed цена
+
+```diff
+--- a/candidate/tests/test_stage_c_contracts.py
++++ b/candidate/tests/test_stage_c_contracts.py
+@@ -0,0 +1,829 @@
++# tests/test_stage_c_contracts.py — SAMSUNG V4 — STAGE C.
++#
++# Типизированные контракты входа/выхода и детерминированное объединение
++# выходов. Покрытие обязательных сценариев ТЗ Stage C §6:
++#   §6.1  все допустимые состояния Entry contract;
++#   §6.2  отклонение некорректного Entry result;
++#   §6.3  все допустимые состояния Exit contract;
++#   §6.4  отклонение некорректного Exit result;
++#   §6.5  защитный выход не подавляется стратегическим;
++#   §6.6  стратегический выход не отменяет защитный;
++#   §6.7  детерминированность объединения;
++#   §6.8  конфликтующие причины выхода;
++#   §6.9  отсутствие цены (fail-closed);
++#   §6.10 некорректная цена (fail-closed);
++#   §6.11 устаревшая цена (fail-closed);
++#   §6.14 корректная атрибуция strategy_id/config_hash/FIGI.
++#
++# Все тесты offline, без сети и брокера; никаких заявок; старые файлы
++# Samsung не затрагиваются. Регрессия Stage A.2.1 / Stage B.1 (§6.18–§6.19)
++# обеспечивается полным и каноническим прогонами (см. TEST_RESULTS_STAGE_C).
++
++import math
++from datetime import datetime, timedelta, timezone
++
++import pandas as pd
++import pytest
++
++from strategy_api import (
++    EntrySignalInput,
++    Signal,
++    SignalDirection,
++    Strategy,
++    StrategyConfig,
++    compute_config_hash,
++)
++import strategy_contracts as sc
++from strategy_contracts import (
++    CoordinatorViolationError,
++    EntryContractViolationError,
++    EntryEvaluation,
++    EntryEvaluationRunner,
++    EntryOutcome,
++    ExitContractViolationError,
++    ExitDecisionSource,
++    ExitEvaluation,
++    ExitEvaluationRequest,
++    ExitMergeOutcome,
++    ExitMergeViolationError,
++    ExitOutcome,
++    PriceCheckOutcome,
++    PriceData,
++    PriceDataViolationError,
++    check_price,
++    merge_exit_evaluations,
++    validate_entry_evaluation,
++    validate_exit_evaluation,
++)
++
++
++NOW = datetime(2026, 11, 28, 12, 0, 0, tzinfo=timezone.utc)
++
++STRATEGY_ID = "alpha"
++CONFIG_HASH = compute_config_hash(STRATEGY_ID, "1.0.0", {"n": 3})
++FIGI = "FIGI1"
++
++
++def make_config(strategy_id=STRATEGY_ID, params=None):
++    params = {"n": 3} if params is None else params
++    return StrategyConfig(
++        strategy_id=strategy_id,
++        strategy_version="1.0.0",
++        params=params,
++        config_hash=compute_config_hash(strategy_id, "1.0.0", params),
++    )
++
++
++def make_price(figi=FIGI, price=100.0, offset_seconds=-30.0,
++               source="test-feed"):
++    ts = NOW + timedelta(seconds=offset_seconds)
++    return PriceData(
++        figi=figi,
++        price=price,
++        timestamp=ts.isoformat(timespec="microseconds").replace("+00:00",
++                                                                "Z"),
++        source=source,
++    )
++
++
++# ===========================================================================
++# Общая проверка атрибуции контрактов (ТЗ §6.14)
++# ===========================================================================
++
++class TestContractAttribution:
++    """ТЗ §6.14: каждый результат несёт strategy_id, config_hash, FIGI."""
++
++    def test_entry_evaluation_carries_full_attribution(self):
++        result = EntryEvaluation.allowed(STRATEGY_ID, CONFIG_HASH, FIGI,
++                                         "ENTRY_SIGNAL_BUY")
++        assert result.strategy_id == STRATEGY_ID
++        assert result.config_hash == CONFIG_HASH
++        assert result.figi == FIGI
++        assert result.outcome is EntryOutcome.ENTRY_ALLOWED
++        assert result.reason_code == "ENTRY_SIGNAL_BUY"
++
++    def test_exit_evaluation_carries_full_attribution(self):
++        result = ExitEvaluation.protective_exit(
++            STRATEGY_ID, CONFIG_HASH, FIGI, "STOP_LOSS", "STOP_LOSS_HIT")
++        assert result.strategy_id == STRATEGY_ID
++        assert result.config_hash == CONFIG_HASH
++        assert result.figi == FIGI
++        assert result.outcome is ExitOutcome.PROTECTIVE_EXIT
++        assert result.decision_source is ExitDecisionSource.PROTECTIVE
++
++    def test_contract_rejects_tampered_config_hash_format(self):
++        with pytest.raises(EntryContractViolationError):
++            EntryEvaluation.allowed(STRATEGY_ID, "deadbeef", FIGI, "OK_CODE")
++
++    def test_contract_rejects_foreign_figi(self):
++        with pytest.raises(ExitContractViolationError):
++            ExitEvaluation.strategic_exit(STRATEGY_ID, CONFIG_HASH,
++                                          "../evil", "TAKE_PROFIT", "R")
++
++    def test_validator_checks_expected_attribution(self):
++        result = ExitEvaluation.no_exit(STRATEGY_ID, CONFIG_HASH, FIGI,
++                                        ExitDecisionSource.STRATEGIC,
++                                        "NO_EXIT_RULES")
++        validated = validate_exit_evaluation(
++            result, expected_strategy_id=STRATEGY_ID,
++            expected_config_hash=CONFIG_HASH, expected_figi=FIGI)
++        assert validated is result
++        with pytest.raises(ExitContractViolationError):
++            validate_exit_evaluation(result, expected_strategy_id="beta")
++        with pytest.raises(ExitContractViolationError):
++            validate_exit_evaluation(result, expected_figi="FIGI2")
++
++    def test_entry_validator_checks_expected_attribution(self):
++        result = EntryEvaluation.no_signal(STRATEGY_ID, CONFIG_HASH, FIGI,
++                                           "NO_SIGNAL_HOLD")
++        assert validate_entry_evaluation(result,
++                                         expected_strategy_id=STRATEGY_ID) \
++            is result
++        with pytest.raises(EntryContractViolationError):
++            validate_entry_evaluation(result, expected_config_hash="0" * 64)
++
++
++# ===========================================================================
++# ТЗ §6.1 — все допустимые состояния Entry contract
++# ===========================================================================
++
++class TestEntryContractStates:
++    """ТЗ §6.1: все допустимые состояния Entry contract создаются
++    и однозначно различаются; только ENTRY_ALLOWED допускает вход."""
++
++    ENTRY_STATES = [
++        (EntryOutcome.ENTRY_ALLOWED, "allowed", "ENTRY_SIGNAL_BUY"),
++        (EntryOutcome.NO_SIGNAL, "no_signal", "NO_SIGNAL_HOLD"),
++        (EntryOutcome.ENTRY_FORBIDDEN, "forbidden", "ENTRY_FORBIDDEN_SELL"),
++        (EntryOutcome.DATA_INSUFFICIENT, "data_insufficient",
++         "CANDLES_MISSING"),
++        (EntryOutcome.INVALID_STRATEGY_RESULT, "invalid_strategy_result",
++         "RESULT_WRONG_TYPE"),
++        (EntryOutcome.EVALUATION_ERROR, "evaluation_error",
++         "EVALUATOR_RAISED"),
++    ]
++
++    @pytest.mark.parametrize("outcome,factory,reason", ENTRY_STATES)
++    def test_all_entry_states_constructible(self, outcome, factory, reason):
++        result = getattr(EntryEvaluation, factory)(
++            STRATEGY_ID, CONFIG_HASH, FIGI, reason,
++            {"detail": "test"})
++        assert type(result) is EntryEvaluation
++        assert result.outcome is outcome
++        assert result.reason_code == reason
++        assert result.diagnostics["detail"] == "test"
++        assert validate_entry_evaluation(result) is result
++
++    def test_only_allowed_state_permits_entry(self):
++        """Ни одно состояние, кроме ENTRY_ALLOWED, не может быть
++        истолковано как разрешение входа (fail-closed, ТЗ §3.1)."""
++        permitting = {EntryOutcome.ENTRY_ALLOWED}
++        for outcome in EntryOutcome:
++            if outcome in permitting:
++                continue
++            result = EntryEvaluation(STRATEGY_ID, CONFIG_HASH, FIGI,
++                                     outcome, "SOME_REASON")
++            assert result.outcome is not EntryOutcome.ENTRY_ALLOWED
++
++    def test_entry_states_are_frozen(self):
++        result = EntryEvaluation.allowed(STRATEGY_ID, CONFIG_HASH, FIGI,
++                                         "ENTRY_SIGNAL_BUY")
++        with pytest.raises(Exception):
++            result.reason_code = "CHANGED"
++        with pytest.raises(Exception):
++            result.diagnostics["injection"] = True
++
++
++# ===========================================================================
++# ТЗ §6.2 — отклонение некорректного Entry result
++# ===========================================================================
++
++class TestEntryContractRejections:
++    """ТЗ §6.2: некорректные результаты входа отклоняются (fail-closed);
++    подклассы не проходят границу потребителя."""
++
++    def test_rejects_string_outcome(self):
++        with pytest.raises(EntryContractViolationError):
++            EntryEvaluation(STRATEGY_ID, CONFIG_HASH, FIGI, "ENTRY_ALLOWED",
++                            "REASON")
++
++    def test_rejects_lowercase_reason_code(self):
++        with pytest.raises(EntryContractViolationError):
++            EntryEvaluation.allowed(STRATEGY_ID, CONFIG_HASH, FIGI, "oops")
++
++    def test_rejects_empty_reason_code(self):
++        with pytest.raises(EntryContractViolationError):
++            EntryEvaluation.allowed(STRATEGY_ID, CONFIG_HASH, FIGI, "")
++
++    def test_rejects_non_json_diagnostics(self):
++        class NotJSON:
++            pass
++        with pytest.raises(EntryContractViolationError):
++            EntryEvaluation.allowed(STRATEGY_ID, CONFIG_HASH, FIGI, "CODE",
++                                    {"object": NotJSON()})
++
++    def test_rejects_nan_diagnostics(self):
++        with pytest.raises(EntryContractViolationError):
++            EntryEvaluation.allowed(STRATEGY_ID, CONFIG_HASH, FIGI, "CODE",
++                                    {"price": float("nan")})
++
++    def test_validator_rejects_wrong_type_and_none(self):
++        for bad in (None, "ENTRY_ALLOWED", {"outcome": "ENTRY_ALLOWED"}):
++            with pytest.raises(EntryContractViolationError):
++                validate_entry_evaluation(bad)
++
++    def test_validator_rejects_subclass(self):
++        class TamperedEntry(EntryEvaluation):
++            def __post_init__(self):
++                pass  # ослабленная валидация подкласса
++        tampered = TamperedEntry(STRATEGY_ID, CONFIG_HASH, FIGI,
++                                 EntryOutcome.ENTRY_ALLOWED, "FREE_ENTRY")
++        with pytest.raises(EntryContractViolationError):
++            validate_entry_evaluation(tampered)
++
++
++# ===========================================================================
++# Entry runner: конвертация ВСЕХ проблем в НЕ-разрешающие состояния
++# ===========================================================================
++
++class _RunnerStrategy(Strategy):
++    strategy_id = STRATEGY_ID
++    strategy_version = "1.0.0"
++
++    def __init__(self, direction=SignalDirection.BUY):
++        self._direction = direction
++
++    def param_specs(self):
++        return ()
++
++    def evaluate_entry(self, signal_input, config):
++        return Signal(strategy_id=config.strategy_id,
++                      config_hash=config.config_hash,
++                      direction=self._direction,
++                      reason="runner-test", figi=signal_input.figi)
++
++
++class _RaisingStrategy(_RunnerStrategy):
++    def evaluate_entry(self, signal_input, config):
++        raise RuntimeError("boom during entry evaluation")
++
++
++class _LiarStrategy(_RunnerStrategy):
++    def evaluate_entry(self, signal_input, config):
++        return Signal(strategy_id="other-strategy",
++                      config_hash=config.config_hash,
++                      direction=SignalDirection.BUY, reason="forged")
++
++
++class _GarbageStrategy(_RunnerStrategy):
++    def evaluate_entry(self, signal_input, config):
++        return {"direction": "BUY"}  # не Signal
++
++
++def make_input(figi=FIGI, candles="ok", last_price=10.0):
++    frame = pd.DataFrame({"c": [1.0, 2.0]}) if candles == "ok" else candles
++    return EntrySignalInput(figi=figi, ticker="TEST", candles=frame,
++                            last_price=last_price)
++
++
++class TestEntryRunner:
++    """ТЗ §3.1 + §6.1/§6.2: рантайм-конвертация входа в контракт."""
++
++    def test_buy_maps_to_allowed(self):
++        runner = EntryEvaluationRunner()
++        result = runner.evaluate(strategy=_RunnerStrategy(
++            SignalDirection.BUY), config=make_config(),
++            entry_input=make_input())
++        assert result.outcome is EntryOutcome.ENTRY_ALLOWED
++        assert result.reason_code == "ENTRY_SIGNAL_BUY"
++        assert result.diagnostics["direction"] == "BUY"
++        assert result.diagnostics["signal_reason"] == "runner-test"
++
++    def test_hold_maps_to_no_signal(self):
++        runner = EntryEvaluationRunner()
++        result = runner.evaluate(strategy=_RunnerStrategy(
++            SignalDirection.HOLD), config=make_config(),
++            entry_input=make_input())
++        assert result.outcome is EntryOutcome.NO_SIGNAL
++        assert result.reason_code == "NO_SIGNAL_HOLD"
++
++    def test_sell_maps_to_forbidden(self):
++        runner = EntryEvaluationRunner()
++        result = runner.evaluate(strategy=_RunnerStrategy(
++            SignalDirection.SELL), config=make_config(),
++            entry_input=make_input())
++        assert result.outcome is EntryOutcome.ENTRY_FORBIDDEN
++        assert result.reason_code == "ENTRY_FORBIDDEN_SELL"
++
++    def test_missing_candles_is_data_insufficient(self):
++        runner = EntryEvaluationRunner()
++        result = runner.evaluate(strategy=_RunnerStrategy(),
++                                 config=make_config(),
++                                 entry_input=make_input(candles=None))
++        assert result.outcome is EntryOutcome.DATA_INSUFFICIENT
++        assert result.reason_code == "CANDLES_MISSING"
++
++    @pytest.mark.parametrize("bad_price", [0.0, -1.0, float("nan"),
++                                           float("inf"), "10"])
++    def test_invalid_price_is_data_insufficient(self, bad_price):
++        runner = EntryEvaluationRunner()
++        result = runner.evaluate(strategy=_RunnerStrategy(),
++                                 config=make_config(),
++                                 entry_input=make_input(
++                                     last_price=bad_price))
++        assert result.outcome is EntryOutcome.DATA_INSUFFICIENT
++        assert result.reason_code == "PRICE_INVALID"
++
++    def test_invalid_figi_is_caller_misuse(self):
++        """Некорректный figi — ошибка маршрутизации вызывающего кода:
++        fail-fast исключение; контракт с недействительным figi не
++        создаётся."""
++        runner = EntryEvaluationRunner()
++        with pytest.raises(CoordinatorViolationError):
++            runner.evaluate(strategy=_RunnerStrategy(), config=make_config(),
++                            entry_input=make_input(figi="bad figi!"))
++
++    def test_strategy_exception_never_allows_entry(self):
++        runner = EntryEvaluationRunner()
++        result = runner.evaluate(strategy=_RaisingStrategy(),
++                                 config=make_config(),
++                                 entry_input=make_input())
++        assert result.outcome is EntryOutcome.EVALUATION_ERROR
++        assert result.reason_code == "EVALUATOR_RAISED"
++        assert result.diagnostics["exception_type"] == "RuntimeError"
++
++    def test_forged_attribution_rejected(self):
++        runner = EntryEvaluationRunner()
++        result = runner.evaluate(strategy=_LiarStrategy(),
++                                 config=make_config(),
++                                 entry_input=make_input())
++        assert result.outcome is EntryOutcome.INVALID_STRATEGY_RESULT
++        assert result.reason_code == "ATTRIBUTION_MISMATCH"
++
++    def test_non_signal_result_rejected(self):
++        runner = EntryEvaluationRunner()
++        result = runner.evaluate(strategy=_GarbageStrategy(),
++                                 config=make_config(),
++                                 entry_input=make_input())
++        assert result.outcome is EntryOutcome.INVALID_STRATEGY_RESULT
++        assert result.reason_code == "RESULT_WRONG_TYPE"
++
++    def test_unknown_direction_rejected(self):
++        class WeirdDirection(_RunnerStrategy):
++            def evaluate_entry(self, signal_input, config):
++                return Signal(strategy_id=config.strategy_id,
++                              config_hash=config.config_hash,
++                              direction="MAYBE", reason="x")
++
++        runner = EntryEvaluationRunner()
++        result = runner.evaluate(strategy=WeirdDirection(),
++                                 config=make_config(),
++                                 entry_input=make_input())
++        assert result.outcome is EntryOutcome.INVALID_STRATEGY_RESULT
++        assert result.reason_code == "DIRECTION_UNKNOWN"
++
++    def test_caller_misuse_raises(self):
++        runner = EntryEvaluationRunner()
++        with pytest.raises(CoordinatorViolationError):
++            runner.evaluate(strategy=_RunnerStrategy(),
++                            config={"not": "config"}, entry_input=make_input())
++        with pytest.raises(CoordinatorViolationError):
++            runner.evaluate(strategy=_RunnerStrategy(),
++                            config=make_config(), entry_input={"x": 1})
++        with pytest.raises(CoordinatorViolationError):
++            runner.evaluate(strategy="not-a-strategy", config=make_config(),
++                            entry_input=make_input())
++
++
++# ===========================================================================
++# ТЗ §6.3 — все допустимые состояния Exit contract
++# ===========================================================================
++
++class TestExitContractStates:
++    """ТЗ §6.3: все допустимые состояния Exit contract создаются;
++    стратегический и защитный источники остаются разными."""
++
++    def test_strategic_exit(self):
++        result = ExitEvaluation.strategic_exit(STRATEGY_ID, CONFIG_HASH,
++                                               FIGI, "TAKE_PROFIT",
++                                               "TAKE_PROFIT_HIT")
++        assert result.outcome is ExitOutcome.STRATEGIC_EXIT
++        assert result.decision_source is ExitDecisionSource.STRATEGIC
++        assert result.exit_type == "TAKE_PROFIT"
++        assert validate_exit_evaluation(result) is result
++
++    def test_protective_exit(self):
++        result = ExitEvaluation.protective_exit(STRATEGY_ID, CONFIG_HASH,
++                                                FIGI, "STOP_LOSS",
++                                                "STOP_LOSS_HIT")
++        assert result.outcome is ExitOutcome.PROTECTIVE_EXIT
++        assert result.decision_source is ExitDecisionSource.PROTECTIVE
++        assert result.exit_type == "STOP_LOSS"
++        assert validate_exit_evaluation(result) is result
++
++    def test_no_exit_strategic_source(self):
++        result = ExitEvaluation.no_exit(STRATEGY_ID, CONFIG_HASH, FIGI,
++                                        ExitDecisionSource.STRATEGIC,
++                                        "NO_EXIT_RULES")
++        assert result.outcome is ExitOutcome.NO_EXIT
++        assert result.exit_type is None
++
++    def test_no_exit_protective_source(self):
++        result = ExitEvaluation.no_exit(STRATEGY_ID, CONFIG_HASH, FIGI,
++                                        ExitDecisionSource.PROTECTIVE,
++                                        "NO_EXIT_RULES")
++        assert result.outcome is ExitOutcome.NO_EXIT
++        assert result.exit_type is None
++
++    @pytest.mark.parametrize("source", [ExitDecisionSource.PRICE_GATE,
++                                        ExitDecisionSource.STRATEGIC,
++                                        ExitDecisionSource.PROTECTIVE])
++    def test_evaluation_blocked_all_sources(self, source):
++        result = ExitEvaluation.evaluation_blocked(
++            STRATEGY_ID, CONFIG_HASH, FIGI, source, "PRICE_MISSING")
++        assert result.outcome is ExitOutcome.EVALUATION_BLOCKED
++        assert result.decision_source is source
++        assert result.exit_type is None
++        assert validate_exit_evaluation(result) is result
++
++    def test_decided_at_optional_but_validated(self):
++        result = ExitEvaluation.strategic_exit(
++            STRATEGY_ID, CONFIG_HASH, FIGI, "TAKE_PROFIT", "TP",
++            decided_at="2026-11-28T12:00:00+00:00")
++        assert result.decided_at == "2026-11-28T12:00:00+00:00"
++        with pytest.raises(ExitContractViolationError):
++            ExitEvaluation.strategic_exit(STRATEGY_ID, CONFIG_HASH, FIGI,
++                                          "TAKE_PROFIT", "TP",
++                                          decided_at="not-a-timestamp")
++        with pytest.raises(ExitContractViolationError):
++            ExitEvaluation.strategic_exit(STRATEGY_ID, CONFIG_HASH, FIGI,
++                                          "TAKE_PROFIT", "TP",
++                                          decided_at="2026-11-28T12:00:00")
++
++    def test_exit_states_are_frozen(self):
++        result = ExitEvaluation.protective_exit(STRATEGY_ID, CONFIG_HASH,
++                                                FIGI, "STOP_LOSS", "SL")
++        with pytest.raises(Exception):
++            result.outcome = ExitOutcome.NO_EXIT
++        with pytest.raises(Exception):
++            result.diagnostics["injection"] = True
++
++
++# ===========================================================================
++# ТЗ §6.4 — отклонение некорректного Exit result
++# ===========================================================================
++
++class TestExitContractRejections:
++    """ТЗ §6.4: несогласованные комбинации исходного состояния и
++    источника решения отклоняются; подклассы не проходят границу."""
++
++    def test_strategic_exit_with_protective_source_rejected(self):
++        with pytest.raises(ExitContractViolationError):
++            ExitEvaluation(STRATEGY_ID, CONFIG_HASH, FIGI,
++                           ExitOutcome.STRATEGIC_EXIT,
++                           ExitDecisionSource.PROTECTIVE, "R", "TAKE_PROFIT")
++
++    def test_protective_exit_with_strategic_source_rejected(self):
++        with pytest.raises(ExitContractViolationError):
++            ExitEvaluation(STRATEGY_ID, CONFIG_HASH, FIGI,
++                           ExitOutcome.PROTECTIVE_EXIT,
++                           ExitDecisionSource.STRATEGIC, "R", "STOP_LOSS")
++
++    def test_exit_without_exit_type_rejected(self):
++        with pytest.raises(ExitContractViolationError):
++            ExitEvaluation(STRATEGY_ID, CONFIG_HASH, FIGI,
++                           ExitOutcome.STRATEGIC_EXIT,
++                           ExitDecisionSource.STRATEGIC, "R", None)
++
++    def test_no_exit_with_price_gate_source_rejected(self):
++        with pytest.raises(ExitContractViolationError):
++            ExitEvaluation(STRATEGY_ID, CONFIG_HASH, FIGI,
++                           ExitOutcome.NO_EXIT,
++                           ExitDecisionSource.PRICE_GATE, "R", None)
++
++    def test_no_exit_with_exit_type_rejected(self):
++        with pytest.raises(ExitContractViolationError):
++            ExitEvaluation(STRATEGY_ID, CONFIG_HASH, FIGI,
++                           ExitOutcome.NO_EXIT,
++                           ExitDecisionSource.STRATEGIC, "R", "STOP_LOSS")
++
++    def test_blocked_with_exit_type_rejected(self):
++        with pytest.raises(ExitContractViolationError):
++            ExitEvaluation(STRATEGY_ID, CONFIG_HASH, FIGI,
++                           ExitOutcome.EVALUATION_BLOCKED,
++                           ExitDecisionSource.PRICE_GATE, "PRICE_MISSING",
++                           "STOP_LOSS")
++
++    def test_validator_rejects_wrong_type_and_subclass(self):
++        with pytest.raises(ExitContractViolationError):
++            validate_exit_evaluation(None)
++        with pytest.raises(ExitContractViolationError):
++            validate_exit_evaluation({"outcome": "STRATEGIC_EXIT"})
++
++        class TamperedExit(ExitEvaluation):
++            def __post_init__(self):
++                pass  # ослабленная валидация подкласса
++
++        tampered = TamperedExit(STRATEGY_ID, CONFIG_HASH, FIGI,
++                                ExitOutcome.PROTECTIVE_EXIT,
++                                ExitDecisionSource.PROTECTIVE, "FORGED",
++                                "STOP_LOSS")
++        with pytest.raises(ExitContractViolationError):
++            validate_exit_evaluation(tampered)
++
++
++# ===========================================================================
++# ТЗ §6.5–§6.8 — объединение выходов
++# ===========================================================================
++
++def s_exit(reason="TAKE_PROFIT_HIT", exit_type="TAKE_PROFIT"):
++    return ExitEvaluation.strategic_exit(STRATEGY_ID, CONFIG_HASH, FIGI,
++                                         exit_type, reason)
++
++
++def p_exit(reason="STOP_LOSS_HIT", exit_type="STOP_LOSS"):
++    return ExitEvaluation.protective_exit(STRATEGY_ID, CONFIG_HASH, FIGI,
++                                          exit_type, reason)
++
++
++def s_no(reason="NO_EXIT_RULES"):
++    return ExitEvaluation.no_exit(STRATEGY_ID, CONFIG_HASH, FIGI,
++                                  ExitDecisionSource.STRATEGIC, reason)
++
++
++def p_no(reason="NO_EXIT_RULES"):
++    return ExitEvaluation.no_exit(STRATEGY_ID, CONFIG_HASH, FIGI,
++                                  ExitDecisionSource.PROTECTIVE, reason)
++
++
++def s_blocked(reason="EVALUATOR_RAISED"):
++    return ExitEvaluation.evaluation_blocked(STRATEGY_ID, CONFIG_HASH, FIGI,
++                                             ExitDecisionSource.STRATEGIC,
++                                             reason)
++
++
++def p_blocked(reason="PRICE_MISSING",
++              source=ExitDecisionSource.PRICE_GATE):
++    return ExitEvaluation.evaluation_blocked(STRATEGY_ID, CONFIG_HASH, FIGI,
++                                             source, reason)
++
++
++class TestExitMerging:
++    """ТЗ §6.5–§6.8: правила приоритета, детерминированность, конфликты."""
++
++    @pytest.mark.parametrize("strategic,protective,expected", [
++        (s_exit(), p_exit(), ExitMergeOutcome.PROTECTIVE_EXIT),
++        (s_no(), p_exit(), ExitMergeOutcome.PROTECTIVE_EXIT),
++        (s_blocked(), p_exit(), ExitMergeOutcome.PROTECTIVE_EXIT),
++        (s_exit(), p_no(), ExitMergeOutcome.STRATEGIC_EXIT),
++        (s_no(), p_no(), ExitMergeOutcome.NO_EXIT),
++        (s_blocked(), p_no(),
++         ExitMergeOutcome.INCOMPLETE_STRATEGIC_EVALUATION),
++        (s_exit(), p_blocked(),
++         ExitMergeOutcome.INCOMPLETE_PROTECTIVE_EVALUATION),
++        (s_no(), p_blocked(),
++         ExitMergeOutcome.INCOMPLETE_PROTECTIVE_EVALUATION),
++        (s_blocked("EVALUATOR_RAISED"),
++         p_blocked("PRICE_STALE", ExitDecisionSource.PROTECTIVE),
++         ExitMergeOutcome.INCOMPLETE_PROTECTIVE_EVALUATION),
++    ])
++    def test_merge_truth_table(self, strategic, protective, expected):
++        result = merge_exit_evaluations(strategic, protective)
++        assert type(result) is sc.ExitMergeResult
++        assert result.final_outcome is expected
++        assert result.strategy_id == STRATEGY_ID
++        assert result.config_hash == CONFIG_HASH
++        assert result.figi == FIGI
++
++    def test_protective_not_suppressed_by_strategic(self):
++        """ТЗ §6.5: защитный выход не подавляется стратегическим."""
++        result = merge_exit_evaluations(s_exit(), p_exit())
++        assert result.final_outcome is ExitMergeOutcome.PROTECTIVE_EXIT
++        assert result.decision_source is ExitDecisionSource.PROTECTIVE
++        assert result.reason_code == "STOP_LOSS_HIT"
++        assert result.exit_type == "STOP_LOSS"
++        assert result.diagnostics["note"] == \
++            "PROTECTIVE_PRIORITY_OVER_STRATEGIC_EXIT"
++
++    def test_strategic_exit_cannot_cancel_protective(self):
++        """ТЗ §6.6: стратегический выход не отменяет защитный; оба
++        источника и обе причины сохраняются в итоге."""
++        result = merge_exit_evaluations(
++            s_exit("STRATEGIC_REASON_X", "TAKE_PROFIT"),
++            p_exit("PROTECTIVE_REASON_Y", "STOP_LOSS"))
++        assert result.final_outcome is ExitMergeOutcome.PROTECTIVE_EXIT
++        assert result.reason_code == "PROTECTIVE_REASON_Y"
++        assert result.diagnostics["strategic"]["reason_code"] == \
++            "STRATEGIC_REASON_X"
++        assert result.diagnostics["protective"]["reason_code"] == \
++            "PROTECTIVE_REASON_Y"
++
++    def test_missing_strategic_exit_does_not_cancel_protective(self):
++        result = merge_exit_evaluations(s_no(), p_exit())
++        assert result.final_outcome is ExitMergeOutcome.PROTECTIVE_EXIT
++
++    def test_merge_is_deterministic(self):
++        """ТЗ §6.7: одинаковые входы всегда дают одинаковый итог."""
++        inputs = (s_exit("R1", "TAKE_PROFIT"), p_exit("R2", "STOP_LOSS"))
++        first = merge_exit_evaluations(*inputs)
++        for _ in range(10):
++            again = merge_exit_evaluations(s_exit("R1", "TAKE_PROFIT"),
++                                           p_exit("R2", "STOP_LOSS"))
++            assert again == first
++            assert again.diagnostics == first.diagnostics
++        # Чистая функция: без времени/случайности — тоже с другим порядком
++        # создания тех же значений результат совпадает.
++        other_pair = (ExitEvaluation.strategic_exit(
++            STRATEGY_ID, CONFIG_HASH, FIGI, "TAKE_PROFIT", "R1"),
++            ExitEvaluation.protective_exit(STRATEGY_ID, CONFIG_HASH, FIGI,
++                                           "STOP_LOSS", "R2"))
++        assert merge_exit_evaluations(*other_pair) == first
++
++    def test_conflicting_reasons_preserved(self):
++        """ТЗ §6.8: конфликтующие причины выхода — итог несёт причину
++        победившего (защитного) решения и сохраняет обе в diagnostics."""
++        result = merge_exit_evaluations(
++            s_exit("TAKE_PROFIT_HIT"), p_exit("TRAILING_STOP_TRIGGERED"))
++        assert result.final_outcome is ExitMergeOutcome.PROTECTIVE_EXIT
++        assert result.reason_code == "TRAILING_STOP_TRIGGERED"
++        assert result.diagnostics["strategic"]["reason_code"] == \
++            "TAKE_PROFIT_HIT"
++        assert result.diagnostics["protective"]["reason_code"] == \
++            "TRAILING_STOP_TRIGGERED"
++        assert result.diagnostics["merge_rules_version"] == \
++            sc.EXIT_MERGE_RULES_VERSION
++
++    def test_incomplete_does_not_lose_strategic_info(self):
++        """Блокированная защитная оценка не теряет информацию
++        стратегического слоя (ничего не отбрасывается молча)."""
++        result = merge_exit_evaluations(
++            s_exit("TAKE_PROFIT_HIT"), p_blocked("PRICE_MISSING"))
++        assert result.final_outcome is \
++            ExitMergeOutcome.INCOMPLETE_PROTECTIVE_EVALUATION
++        assert result.reason_code == "PRICE_MISSING"
++        assert result.decision_source is None
++        assert result.exit_type is None
++        assert result.diagnostics["strategic"]["outcome"] == \
++            "STRATEGIC_EXIT"
++        assert result.diagnostics["strategic"]["reason_code"] == \
++            "TAKE_PROFIT_HIT"
++
++    def test_merge_rejects_attribution_mismatch(self):
++        other_config = make_config(params={"n": 4})
++        foreign = ExitEvaluation.protective_exit(
++            "beta", other_config.config_hash, FIGI, "STOP_LOSS", "SL")
++        with pytest.raises(ExitMergeViolationError):
++            merge_exit_evaluations(s_exit(), foreign)
++        foreign_figi = ExitEvaluation.protective_exit(
++            STRATEGY_ID, CONFIG_HASH, "FIGI2", "STOP_LOSS", "SL")
++        with pytest.raises(ExitMergeViolationError):
++            merge_exit_evaluations(s_exit(), foreign_figi)
++
++    def test_merge_rejects_wrong_types(self):
++        with pytest.raises(ExitMergeViolationError):
++            merge_exit_evaluations("strategic", p_exit())
++        with pytest.raises(ExitMergeViolationError):
++            merge_exit_evaluations(s_exit(), None)
++
++    def test_merge_rejects_subclasses(self):
++        class TamperedExit(ExitEvaluation):
++            def __post_init__(self):
++                pass
++
++        tampered = TamperedExit(STRATEGY_ID, CONFIG_HASH, FIGI,
++                                ExitOutcome.PROTECTIVE_EXIT,
++                                ExitDecisionSource.PROTECTIVE, "FORGED",
++                                "STOP_LOSS")
++        with pytest.raises(ExitMergeViolationError):
++            merge_exit_evaluations(s_exit(), tampered)
++
++
++# ===========================================================================
++# ТЗ §6.9–§6.11 — fail-closed проверка цены
++# ===========================================================================
++
++class TestPriceGate:
++    """ТЗ §6.9–§6.11: отсутствующая/некорректная/устаревшая цена —
++    отдельный типизированный результат, никаких подстановок."""
++
++    def test_missing_price(self):
++        result = check_price(None, expected_figi=FIGI, now=NOW,
++                             max_age_seconds=120.0)
++        assert result.outcome is PriceCheckOutcome.PRICE_MISSING
++        assert result.reason_code == "PRICE_MISSING"
++        assert result.price is None
++        assert "подстановка" in result.diagnostics["detail"]
++
++    def test_wrong_type_price(self):
++        for bad in ("100.0", 100.0, {"price": 100.0}):
++            result = check_price(bad, expected_figi=FIGI, now=NOW,
++                                 max_age_seconds=120.0)
++            assert result.outcome is PriceCheckOutcome.PRICE_INVALID
++            assert result.reason_code == "PRICE_WRONG_TYPE"
++
++    def test_foreign_figi_price_rejected(self):
++        result = check_price(make_price(figi="OTHER"), expected_figi=FIGI,
++                             now=NOW, max_age_seconds=120.0)
++        assert result.outcome is PriceCheckOutcome.PRICE_INVALID
++        assert result.reason_code == "PRICE_FOREIGN_FIGI"
++
++    def test_future_price_rejected(self):
++        result = check_price(make_price(offset_seconds=+5.0),
++                             expected_figi=FIGI, now=NOW,
++                             max_age_seconds=120.0)
++        assert result.outcome is PriceCheckOutcome.PRICE_INVALID
++        assert result.reason_code == "PRICE_FROM_FUTURE"
++
++    def test_stale_price(self):
++        result = check_price(make_price(offset_seconds=-300.0),
++                             expected_figi=FIGI, now=NOW,
++                             max_age_seconds=120.0)
++        assert result.outcome is PriceCheckOutcome.PRICE_STALE
++        assert result.reason_code == "PRICE_STALE"
++        assert result.price is None
++
++    def test_staleness_boundary_exactly_max_age_is_ok(self):
++        result = check_price(make_price(offset_seconds=-120.0),
++                             expected_figi=FIGI, now=NOW,
++                             max_age_seconds=120.0)
++        assert result.outcome is PriceCheckOutcome.PRICE_OK
++        assert result.price is not None
++
++    def test_staleness_disabled_only_explicitly(self):
++        result = check_price(make_price(offset_seconds=-100000.0),
++                             expected_figi=FIGI, now=NOW,
++                             max_age_seconds=None)
++        assert result.outcome is PriceCheckOutcome.PRICE_OK
++        assert result.diagnostics["max_age_seconds"] is None
++
++    def test_valid_price_passes(self):
++        price = make_price()
++        result = check_price(price, expected_figi=FIGI, now=NOW,
++                             max_age_seconds=120.0)
++        assert result.outcome is PriceCheckOutcome.PRICE_OK
++        assert result.price is price
++        assert result.diagnostics["age_seconds"] == pytest.approx(30.0)
++
++    def test_invalid_max_age_rejected(self):
++        with pytest.raises(PriceDataViolationError):
++            check_price(make_price(), expected_figi=FIGI, now=NOW,
++                        max_age_seconds=-1.0)
++        with pytest.raises(PriceDataViolationError):
++            check_price(make_price(), expected_figi=FIGI, now=NOW,
++                        max_age_seconds=float("nan"))
++
++    @pytest.mark.parametrize("bad_price", [0.0, -5.0, float("nan"),
++                                           float("inf"), "100", True])
++    def test_price_data_construction_rejects_invalid_values(self, bad_price):
++        with pytest.raises(PriceDataViolationError):
++            PriceData(figi=FIGI, price=bad_price,
++                      timestamp=make_price().timestamp, source="feed")
++
++    def test_price_data_rejects_naive_timestamp_and_empty_source(self):
++        with pytest.raises(PriceDataViolationError):
++            PriceData(figi=FIGI, price=1.0,
++                      timestamp="2026-11-28T12:00:00", source="feed")
++        with pytest.raises(PriceDataViolationError):
++            PriceData(figi=FIGI, price=1.0, timestamp=make_price().timestamp,
++                      source="   ")
++
++    def test_zero_price_substitution_is_impossible(self):
++        """ТЗ §3.4: нулевая цена не может попасть в контракт — ни как
++        значение PriceData, ни как подстановка при проверке."""
++        with pytest.raises(PriceDataViolationError):
++            PriceData(figi=FIGI, price=0.0, timestamp=make_price().timestamp,
++                      source="feed")
++        result = check_price(None, expected_figi=FIGI, now=NOW,
++                             max_age_seconds=120.0)
++        assert result.price is None  # отсутствие цены — отсутствие цены
++
++
++# ===========================================================================
++# ExitEvaluationRequest
++# ===========================================================================
++
++class TestExitEvaluationRequest:
++    def test_request_validated_and_frozen(self):
++        request = ExitEvaluationRequest(
++            strategy_id=STRATEGY_ID, config_hash=CONFIG_HASH, figi=FIGI,
++            state_data={"position": 10}, price=make_price())
++        assert request.state_data["position"] == 10
++        with pytest.raises(Exception):
++            request.figi = "OTHER"
++
++    def test_request_rejects_invalid_price_type(self):
++        with pytest.raises(ExitContractViolationError):
++            ExitEvaluationRequest(strategy_id=STRATEGY_ID,
++                                  config_hash=CONFIG_HASH, figi=FIGI,
++                                  price={"price": 1.0})
++
++    def test_request_rejects_non_json_state_data(self):
++        with pytest.raises(ExitContractViolationError):
++            ExitEvaluationRequest(strategy_id=STRATEGY_ID,
++                                  config_hash=CONFIG_HASH, figi=FIGI,
++                                  state_data={"obj": object()})
++
++    def test_request_rejects_tampered_keys(self):
++        with pytest.raises(ExitContractViolationError):
++            ExitEvaluationRequest(strategy_id="bad strategy id!",
++                                  config_hash=CONFIG_HASH, figi=FIGI)
+```
+
+### candidate/tests/test_stage_c_exit_service.py
+Тесты Stage C (координатор + состояние): 32 теста — fail-closed цена на уровне координатора, отсутствие фиктивного исполнения, сохранение состояния при неудачной оценке, атрибуция и защита от подмены config_hash, изоляция (стратегии/FIGI), конкурентное обновление через Stage B.1, misuse-исключения
+
+```diff
+--- a/candidate/tests/test_stage_c_exit_service.py
++++ b/candidate/tests/test_stage_c_exit_service.py
+@@ -0,0 +1,683 @@
++# tests/test_stage_c_exit_service.py — SAMSUNG V4 — STAGE C.
++#
++# Координатор выхода (ExitDecisionCoordinator) и интеграция с
++# StrategyStateManager Stage B.1. Покрытие обязательных сценариев
++# ТЗ Stage C §6:
++#   §6.9  отсутствие цены (координатор: оценщики не вызываются);
++#   §6.10 некорректная цена (координатор: fail-closed, нулевая цена
++#         невозможна, чужой FIGI не проходит);
++#   §6.11 устаревшая цена (координатор: PRICE_STALE, состояние не
++#         изменяется);
++#   §6.12 отсутствие фиктивного исполнения при ошибке оценки;
++#   §6.13 сохранение состояния при неудачной оценке выхода;
++#   §6.14 корректная атрибуция strategy_id/config_hash/FIGI;
++#   §6.15 изоляция состояний нескольких стратегий;
++#   §6.16 изоляция нескольких FIGI;
++#   §6.17 конкурентное обновление состояния через Stage B.1;
++#   плюс: ошибки состояния не маскируются; подмена config_hash
++#   отклоняется (Stage A.2.1 перепроверка); подклассы не проходят.
++#
++# Все тесты offline, без сети и брокера; никаких заявок; старые файлы
++# Samsung не затрагиваются.
++
++import json
++import threading
++from concurrent.futures import ThreadPoolExecutor
++from datetime import datetime, timedelta, timezone
++
++import pytest
++
++from strategy_api import StrategyConfig, compute_config_hash
++import strategy_state as ss
++from strategy_contracts import (
++    CoordinatorViolationError,
++    ExitDecisionCoordinator,
++    ExitDecisionSource,
++    ExitEvaluation,
++    ExitEvaluationRequest,
++    ExitMergeOutcome,
++    ExitOutcome,
++    PriceCheckOutcome,
++    PriceData,
++)
++from strategy_state import (
++    StateConfigMismatchError,
++    StateCorruptionError,
++    StateStore,
++    StrategyStateManager,
++)
++
++
++NOW = datetime(2026, 11, 28, 12, 0, 0, tzinfo=timezone.utc)
++FIXED_CLOCK = "2026-11-28T12:00:00.000000+00:00"
++
++
++def make_config(strategy_id="alpha", params=None):
++    params = {"n": 3} if params is None else params
++    return StrategyConfig(
++        strategy_id=strategy_id,
++        strategy_version="1.0.0",
++        params=params,
++        config_hash=compute_config_hash(strategy_id, "1.0.0", params),
++    )
++
++
++def make_price(figi="FIGI1", price=100.0, offset_seconds=-30.0):
++    ts = NOW + timedelta(seconds=offset_seconds)
++    return PriceData(
++        figi=figi, price=price,
++        timestamp=ts.isoformat(timespec="microseconds")
++        .replace("+00:00", "Z"),
++        source="test-feed")
++
++
++class CountingEvaluator:
++    """Оценщик со счётчиком вызовов (проверка «оценщики не вызывались»)."""
++
++    def __init__(self, source, behavior="no_exit"):
++        self.source = source
++        self.behavior = behavior
++        self.calls = 0
++
++    def evaluate_exit(self, request):
++        self.calls += 1
++        if self.behavior == "no_exit":
++            return ExitEvaluation.no_exit(
++                request.strategy_id, request.config_hash, request.figi,
++                self.source, "NO_EXIT_RULES")
++        if self.behavior == "strategic_exit":
++            return ExitEvaluation.strategic_exit(
++                request.strategy_id, request.config_hash, request.figi,
++                "TAKE_PROFIT", "TAKE_PROFIT_HIT")
++        if self.behavior == "protective_exit":
++            return ExitEvaluation.protective_exit(
++                request.strategy_id, request.config_hash, request.figi,
++                "STOP_LOSS", "STOP_LOSS_HIT")
++        if self.behavior == "raise":
++            raise RuntimeError("protective layer crashed")
++        if self.behavior == "garbage":
++            return {"outcome": "PROTECTIVE_EXIT"}
++        raise AssertionError(f"unknown behavior {self.behavior}")
++
++
++def make_coord(manager, strategic="no_exit", protective="no_exit",
++               clock=FIXED_CLOCK):
++    strategic_eval = CountingEvaluator(ExitDecisionSource.STRATEGIC,
++                                       strategic)
++    protective_eval = CountingEvaluator(ExitDecisionSource.PROTECTIVE,
++                                        protective)
++    coordinator = ExitDecisionCoordinator(
++        manager=manager,
++        strategic_evaluator=strategic_eval,
++        protective_evaluator=protective_eval,
++        clock=(lambda: clock) if clock else None,
++    )
++    return coordinator, strategic_eval, protective_eval
++
++
++def run(coordinator, config, figi="FIGI1", price=..., price_required=True,
++        max_age=120.0, now=NOW):
++    """Помощник прогона: по умолчанию — ВАЛИДНАЯ цена под заданный figi;
++    price=None передаётся ЯВНО для сценариев блокировки."""
++    kwargs = {}
++    if price is not ...:
++        kwargs["price"] = price
++    elif price_required:
++        kwargs["price"] = make_price(figi=figi)  # валидная цена по умолчанию
++    return coordinator.evaluate_and_record(
++        config=config, figi=figi, price_required=price_required,
++        price_max_age_seconds=max_age, now=now, **kwargs)
++
++
++# ===========================================================================
++# Базовые циклы координатора
++# ===========================================================================
++
++class TestCoordinatorHappyPaths:
++    def test_no_exit_recorded_via_atomic_api(self):
++        manager = StrategyStateManager(StateStore())
++        config = make_config()
++        coordinator, strategic, protective = make_coord(manager)
++        report = run(coordinator, config)
++        assert report.merged.final_outcome is ExitMergeOutcome.NO_EXIT
++        assert report.state_updated is True
++        assert strategic.calls == 1 and protective.calls == 1
++        state = manager.get_state("alpha", "FIGI1",
++                                  config_hash=config.config_hash)
++        record = state.data["last_exit_evaluation"]
++        assert record["outcome"] == "NO_EXIT"
++        assert record["strategy_id"] == "alpha"
++        assert record["config_hash"] == config.config_hash
++        assert record["figi"] == "FIGI1"
++        assert record["decided_at"] == FIXED_CLOCK
++        assert record["merge_rules_version"] == "exit_merge_rules_v1"
++
++    def test_protective_exit_wins_end_to_end(self):
++        manager = StrategyStateManager(StateStore())
++        config = make_config()
++        coordinator, _, _ = make_coord(manager,
++                                       strategic="strategic_exit",
++                                       protective="protective_exit")
++        report = run(coordinator, config, price=make_price())
++        assert report.merged.final_outcome is ExitMergeOutcome.PROTECTIVE_EXIT
++        assert report.merged.decision_source is ExitDecisionSource.PROTECTIVE
++        assert report.merged.exit_type == "STOP_LOSS"
++        assert report.state_updated is True
++
++    def test_strategic_exit_passes_when_protective_says_no(self):
++        manager = StrategyStateManager(StateStore())
++        config = make_config()
++        coordinator, _, _ = make_coord(manager,
++                                       strategic="strategic_exit",
++                                       protective="no_exit")
++        report = run(coordinator, config, price=make_price())
++        assert report.merged.final_outcome is ExitMergeOutcome.STRATEGIC_EXIT
++        assert report.merged.decision_source is ExitDecisionSource.STRATEGIC
++
++    def test_price_not_required_proceeds_without_price(self):
++        manager = StrategyStateManager(StateStore())
++        config = make_config()
++        coordinator, strategic, protective = make_coord(manager)
++        report = run(coordinator, config, price_required=False)
++        assert report.price_check.outcome is PriceCheckOutcome.PRICE_MISSING
++        assert strategic.calls == 1 and protective.calls == 1
++        assert report.merged.final_outcome is ExitMergeOutcome.NO_EXIT
++
++
++# ===========================================================================
++# ТЗ §6.9–§6.11 — fail-closed цена на уровне координатора
++# ===========================================================================
++
++class TestCoordinatorPriceGate:
++    def test_missing_price_blocks_before_evaluators(self):
++        manager = StrategyStateManager(StateStore())
++        config = make_config()
++        coordinator, strategic, protective = make_coord(manager)
++        report = run(coordinator, config, price=None)  # цена не передана
++        assert report.merged.final_outcome is \
++            ExitMergeOutcome.INCOMPLETE_PRICE_EVALUATION
++        assert report.merged.reason_code == "PRICE_MISSING"
++        assert report.strategic_result is None
++        assert report.protective_result is None
++        assert strategic.calls == 0 and protective.calls == 0
++        assert report.merged.diagnostics["evaluators_called"] is False
++
++    def test_stale_price_blocks_and_state_untouched(self):
++        manager = StrategyStateManager(StateStore())
++        config = make_config()
++        coordinator, strategic, protective = make_coord(manager)
++        stale = make_price(offset_seconds=-600.0)
++        report = run(coordinator, config, price=stale, max_age=120.0)
++        assert report.merged.reason_code == "PRICE_STALE"
++        assert strategic.calls == 0 and protective.calls == 0
++        assert report.state_updated is False
++
++    def test_foreign_price_blocks(self):
++        manager = StrategyStateManager(StateStore())
++        config = make_config()
++        coordinator, _, _ = make_coord(manager)
++        foreign = make_price(figi="OTHER")
++        report = run(coordinator, config, price=foreign)
++        assert report.merged.reason_code == "PRICE_FOREIGN_FIGI"
++        assert report.merged.final_outcome is \
++            ExitMergeOutcome.INCOMPLETE_PRICE_EVALUATION
++
++    def test_price_not_required_but_invalid_price_still_blocks(self):
++        """Цена не требуется, но ПЕРЕДАНА некорректная (чужой FIGI):
++        мусорные данные не доходят до оценщиков (fail-closed)."""
++        manager = StrategyStateManager(StateStore())
++        config = make_config()
++        coordinator, strategic, protective = make_coord(manager)
++        foreign = make_price(figi="OTHER")
++        report = run(coordinator, config, price=foreign, price_required=False)
++        assert report.merged.reason_code == "PRICE_FOREIGN_FIGI"
++        assert strategic.calls == 0 and protective.calls == 0
++
++    def test_invalid_price_object_type_blocked(self):
++        manager = StrategyStateManager(StateStore())
++        config = make_config()
++        coordinator, _, _ = make_coord(manager)
++        report = run(coordinator, config, price="100.5")
++        assert report.merged.reason_code == "PRICE_WRONG_TYPE"
++        assert report.merged.final_outcome is \
++            ExitMergeOutcome.INCOMPLETE_PRICE_EVALUATION
++
++
++# ===========================================================================
++# ТЗ §6.12–§6.13 — ошибки оценки: без фиктивного исполнения,
++# состояние сохраняется
++# ===========================================================================
++
++class TestFailedEvaluationNoFictitiousExecution:
++    def test_evaluator_exception_converted_to_blocked(self):
++        manager = StrategyStateManager(StateStore())
++        config = make_config()
++        coordinator, strategic, protective = make_coord(
++            manager, strategic="no_exit", protective="raise")
++        report = run(coordinator, config, price=make_price())
++        assert report.protective_result.outcome is \
++            ExitOutcome.EVALUATION_BLOCKED
++        assert report.protective_result.reason_code == "EVALUATOR_RAISED"
++        assert report.protective_result.decision_source is \
++            ExitDecisionSource.PROTECTIVE
++        assert report.merged.final_outcome is \
++            ExitMergeOutcome.INCOMPLETE_PROTECTIVE_EVALUATION
++        assert report.merged.reason_code == "EVALUATOR_RAISED"
++        assert report.state_updated is False
++        # Никакого «исполненного» выхода в состоянии нет.
++        state = manager.get_state("alpha", "FIGI1",
++                                  config_hash=config.config_hash)
++        assert "last_exit_evaluation" not in state.data
++
++    def test_state_preserved_on_failed_evaluation(self):
++        """ТЗ §6.13: при неудачной оценке выхода состояние пары
++        сохраняется побайтово (ни changed data, ни updated_at)."""
++        manager = StrategyStateManager(StateStore())
++        config = make_config()
++        # Создаём состояние с содержимым и обновлением.
++        manager.update_state("alpha", "FIGI1", config_hash=config.config_hash,
++                             data={"position": 10, "avg_price": 99.5})
++        before = manager.get_state("alpha", "FIGI1",
++                                   config_hash=config.config_hash).to_json()
++        coordinator, _, _ = make_coord(manager, protective="raise")
++        report = run(coordinator, config, price=make_price())
++        assert report.state_updated is False
++        after = manager.get_state("alpha", "FIGI1",
++                                  config_hash=config.config_hash).to_json()
++        assert before == after
++
++    def test_state_preserved_on_price_block(self):
++        manager = StrategyStateManager(StateStore())
++        config = make_config()
++        manager.update_state("alpha", "FIGI1", config_hash=config.config_hash,
++                             data={"position": 10})
++        before = manager.get_state("alpha", "FIGI1",
++                                   config_hash=config.config_hash).to_json()
++        coordinator, _, _ = make_coord(manager)
++        report = run(coordinator, config, price=None)  # цена не передана
++        assert report.state_updated is False
++        after = manager.get_state("alpha", "FIGI1",
++                                  config_hash=config.config_hash).to_json()
++        assert before == after
++
++    def test_garbage_evaluator_result_blocked(self):
++        manager = StrategyStateManager(StateStore())
++        config = make_config()
++        coordinator, _, protective = make_coord(manager,
++                                                protective="garbage")
++        report = run(coordinator, config, price=make_price())
++        assert report.protective_result.outcome is \
++            ExitOutcome.EVALUATION_BLOCKED
++        assert report.protective_result.reason_code == \
++            "INVALID_EVALUATOR_RESULT"
++        assert report.merged.final_outcome is \
++            ExitMergeOutcome.INCOMPLETE_PROTECTIVE_EVALUATION
++        assert report.state_updated is False
++
++    def test_subclass_result_from_evaluator_rejected(self):
++        class TamperedExit(ExitEvaluation):
++            def __post_init__(self):
++                pass
++
++        class ForgingEvaluator:
++            def evaluate_exit(self, request):
++                return TamperedExit(request.strategy_id, request.config_hash,
++                                    request.figi,
++                                    ExitOutcome.PROTECTIVE_EXIT,
++                                    ExitDecisionSource.PROTECTIVE,
++                                    "FORGED", "STOP_LOSS")
++
++        manager = StrategyStateManager(StateStore())
++        config = make_config()
++        coordinator = ExitDecisionCoordinator(
++            manager=manager,
++            strategic_evaluator=CountingEvaluator(
++                ExitDecisionSource.STRATEGIC),
++            protective_evaluator=ForgingEvaluator(),
++            clock=lambda: FIXED_CLOCK)
++        report = run(coordinator, config, price=make_price())
++        assert report.protective_result.reason_code == \
++            "INVALID_EVALUATOR_RESULT"
++        assert report.state_updated is False
++
++    def test_partial_evaluator_results_impossible_in_report(self):
++        report = ExitDecisionCoordinator.__new__(ExitDecisionCoordinator)
++        # Прямая проверка инварианта отчёта: один результат без второго
++        # невозможен (fail-closed).
++        from strategy_contracts import ExitDecisionReport, PriceCheckResult
++        price_check = PriceCheckResult(
++            outcome=PriceCheckOutcome.PRICE_OK, reason_code="PRICE_OK",
++            price=make_price())
++        with pytest.raises(Exception):
++            ExitDecisionReport(
++                strategy_id="alpha", config_hash=make_config().config_hash,
++                figi="FIGI1", price_check=price_check,
++                merged=ExitDecisionCoordinator.__new__(object) if False
++                else _merged_for_report(make_config()),
++                strategic_result=None,
++                protective_result=_protective(make_config()),
++                state_updated=False, decided_at=FIXED_CLOCK)
++
++
++def _protective(config):
++    return ExitEvaluation.protective_exit(
++        config.strategy_id, config.config_hash, "FIGI1",
++        "STOP_LOSS", "STOP_LOSS_HIT")
++
++
++def _merged_for_report(config):
++    from strategy_contracts import ExitMergeResult, merge_exit_evaluations
++    strategic = ExitEvaluation.no_exit(
++        config.strategy_id, config.config_hash, "FIGI1",
++        ExitDecisionSource.STRATEGIC, "NO_EXIT_RULES")
++    protective = _protective(config)
++    return merge_exit_evaluations(strategic, protective)
++
++
++# ===========================================================================
++# ТЗ §6.14 — атрибуция и защита от подмены config_hash
++# ===========================================================================
++
++class TestCoordinatorAttribution:
++    def test_report_attribution_matches_config(self):
++        manager = StrategyStateManager(StateStore())
++        config = make_config()
++        coordinator, _, _ = make_coord(manager)
++        report = run(coordinator, config, price=make_price())
++        assert report.strategy_id == config.strategy_id
++        assert report.config_hash == config.config_hash
++        assert report.figi == "FIGI1"
++        assert report.strategic_result.strategy_id == config.strategy_id
++        assert report.strategic_result.config_hash == config.config_hash
++        assert report.protective_result.figi == "FIGI1"
++
++    def test_fabricated_config_hash_rejected_by_stage_a2_1_recheck(self):
++        """Подмена config_hash: объект, СОБРАННЫЙ в обход публичного API
++        (object.__setattr__ вместо __post_init__) с хешем, не
++        соответствующим фактическим параметрам, отклоняется
++        ПЕРЕПРОВЕРКОЙ Stage A.2.1 (AttributionContext.from_config)
++        до любой оценки. Через публичный API Stage A.2 такой объект
++        создать невозможно: StrategyConfig.__post_init__ отвергает
++        несовпадающий хеш при создании."""
++        manager = StrategyStateManager(StateStore())
++        forged = StrategyConfig.__new__(StrategyConfig)
++        object.__setattr__(forged, "strategy_id", "alpha")
++        object.__setattr__(forged, "strategy_version", "1.0.0")
++        object.__setattr__(forged, "params", {"n": 3})
++        object.__setattr__(forged, "config_hash",
++                           compute_config_hash("alpha", "1.0.0", {"n": 999}))
++        object.__setattr__(forged, "origin", "forged")
++        object.__setattr__(forged, "metadata", {})
++        coordinator, _, _ = make_coord(manager)
++        with pytest.raises(CoordinatorViolationError):
++            run(coordinator, forged, price=make_price())
++
++    def test_state_config_hash_mismatch_propagates_unmasked(self):
++        """Несовпадение config_hash сохранённого состояния:
++        StateConfigMismatchError пробрасывается как есть (не маскируется
++        пустыми значениями), состояние не переносится."""
++        manager = StrategyStateManager(StateStore())
++        old_config = make_config(params={"n": 3})
++        new_config = make_config(params={"n": 7})
++        manager.get_state("alpha", "FIGI1", config_hash=old_config.config_hash)
++        coordinator, _, _ = make_coord(manager)
++        with pytest.raises(StateConfigMismatchError):
++            run(coordinator, new_config, price=make_price())
++
++    def test_corrupted_state_error_propagates_unmasked(self, tmp_path):
++        """Повреждённая запись состояния: StateCorruptionError
++        пробрасывается из координатора как есть (ошибки состояния
++        не маскируются, ТЗ §3.5)."""
++        store = StateStore(path=str(tmp_path))
++        manager = StrategyStateManager(store)
++        config = make_config()
++        manager.get_state("alpha", "FIGI1",
++                          config_hash=config.config_hash)
++        # Повреждаем содержимое файла: подменяем ключ записи чужим.
++        names = [n for n in sorted(__import__("os").listdir(tmp_path))
++                 if n.endswith(".json")]
++        target = tmp_path / names[0]
++        payload = json.loads(target.read_text(encoding="utf-8"))
++        payload["strategy_id"] = "someone-else"
++        payload["figi"] = "FIGI1"
++        target.write_text(json.dumps(payload), encoding="utf-8")
++        coordinator, _, _ = make_coord(manager)
++        with pytest.raises(StateCorruptionError):
++            run(coordinator, config, price=make_price())
++
++
++# ===========================================================================
++# ТЗ §6.15–§6.16 — изоляция состояний
++# ===========================================================================
++
++class TestStateIsolation:
++    def test_two_strategies_same_figi_isolated(self):
++        """ТЗ §6.15: состояние стратегии A не влияет на стратегию B."""
++        manager = StrategyStateManager(StateStore())
++        config_a = make_config(strategy_id="alpha")
++        config_b = make_config(strategy_id="beta", params={"n": 5})
++        coord_a, _, _ = make_coord(manager)
++        coord_b, _, _ = make_coord(manager,
++                                   protective="protective_exit")
++        run(coord_a, config_a, figi="FIGI1")
++        run(coord_b, config_b, figi="FIGI1")
++        state_a = manager.get_state("alpha", "FIGI1",
++                                    config_hash=config_a.config_hash)
++        state_b = manager.get_state("beta", "FIGI1",
++                                    config_hash=config_b.config_hash)
++        assert state_a.data["last_exit_evaluation"]["outcome"] == "NO_EXIT"
++        assert state_b.data["last_exit_evaluation"]["outcome"] == \
++            "PROTECTIVE_EXIT"
++        assert state_a.strategy_id == "alpha"
++        assert state_b.strategy_id == "beta"
++        assert manager.list_states() is not None
++        keys = {s.key() for s in manager.list_states()}
++        assert ("alpha", "FIGI1") in keys and ("beta", "FIGI1") in keys
++
++    def test_same_strategy_two_figi_isolated(self):
++        """ТЗ §6.16: состояние инструмента X не влияет на инструмент Y."""
++        manager = StrategyStateManager(StateStore())
++        config = make_config()
++        coord_x, _, _ = make_coord(manager)
++        coord_y, _, _ = make_coord(manager, protective="protective_exit")
++        run(coord_x, config, figi="FIGI1")
++        run(coord_y, config, figi="FIGI2")
++        state_x = manager.get_state("alpha", "FIGI1",
++                                    config_hash=config.config_hash)
++        state_y = manager.get_state("alpha", "FIGI2",
++                                    config_hash=config.config_hash)
++        assert state_x.data["last_exit_evaluation"]["outcome"] == "NO_EXIT"
++        assert state_y.data["last_exit_evaluation"]["outcome"] == \
++            "PROTECTIVE_EXIT"
++        assert state_x.figi == "FIGI1" and state_y.figi == "FIGI2"
++
++    def test_isolation_persists_in_persistent_store(self, tmp_path):
++        """ТЗ §6.15/§6.16 + Stage B: изоляция и запись в persistent-режиме
++        (файлы создаются, читаются после «перезапуска»)."""
++        store = StateStore(path=str(tmp_path))
++        manager = StrategyStateManager(store)
++        config_a = make_config(strategy_id="alpha")
++        config_b = make_config(strategy_id="beta", params={"n": 5})
++        coord_a, _, _ = make_coord(manager)
++        coord_b, _, _ = make_coord(manager, protective="protective_exit")
++        run(coord_a, config_a, figi="FIGI1")
++        run(coord_b, config_b, figi="FIGI2")
++
++        # Новый менеджер на том же пути — состояние восстановлено.
++        manager2 = StrategyStateManager(StateStore(path=str(tmp_path)))
++        state_a2 = manager2.get_state("alpha", "FIGI1",
++                                      config_hash=config_a.config_hash)
++        state_b2 = manager2.get_state("beta", "FIGI2",
++                                      config_hash=config_b.config_hash)
++        assert state_a2.data["last_exit_evaluation"]["outcome"] == "NO_EXIT"
++        assert state_b2.data["last_exit_evaluation"]["outcome"] == \
++            "PROTECTIVE_EXIT"
++        assert ("alpha", "FIGI1") != ("beta", "FIGI2")
++        names = sorted(n for n in __import__("os").listdir(tmp_path)
++                       if n.endswith(".json"))
++        assert len(names) == 2  # ровно две записи, ровно по одной на пару
++
++
++# ===========================================================================
++# ТЗ §6.17 — конкурентное обновление состояния через Stage B.1
++# ===========================================================================
++
++class TestConcurrentStateUpdates:
++    def test_parallel_managers_shared_store_no_lost_updates(self, tmp_path):
++        """ТЗ §6.17: два менеджера на РАЗНЫХ экземплярах StateStore одного
++        пути + координаторы — параллельные атомарные read-modify-write не
++        теряют обновлений (Stage B.1, общий RLock каталога)."""
++        store1 = StateStore(path=str(tmp_path))
++        store2 = StateStore(path=str(tmp_path))
++        manager1 = StrategyStateManager(store1)
++        manager2 = StrategyStateManager(store2)
++        config = make_config()
++        coord1, _, _ = make_coord(manager1)
++        coord2, _, _ = make_coord(manager2, protective="protective_exit")
++
++        # Прогрев: создаём запись состояния пары.
++        run(coord1, config, price=make_price())
++
++        increments = {"m1": 40, "m2": 40}
++        errors = []
++
++        def worker(manager, label, count):
++            for _ in range(count):
++                try:
++                    manager.update_state(
++                        "alpha", "FIGI1",
++                        config_hash=config.config_hash,
++                        updater=lambda current: {
++                            **ss.unfreeze(current.data),
++                            "counter":
++                                current.data.get("counter", 0) + 1,
++                        })
++                except Exception as exc:  # pragma: no cover
++                    errors.append((label, exc))
++
++        with ThreadPoolExecutor(max_workers=8) as pool:
++            futures = []
++            for manager, label, count in (
++                    (manager1, "m1", increments["m1"]),
++                    (manager2, "m2", increments["m2"])):
++                for _ in range(4):  # 4 потока на менеджера
++                    futures.append(pool.submit(worker, manager, label, 10))
++            # Параллельно — координаторные циклы с записью в состояние.
++            for i in range(8):
++                futures.append(pool.submit(
++                    run, coord1 if i % 2 == 0 else coord2, config,
++                    price=make_price()))
++            for future in futures:
++                future.result()
++
++        assert errors == []
++        state = manager1.get_state("alpha", "FIGI1",
++                                   config_hash=config.config_hash)
++        assert state.data["counter"] == \
++            increments["m1"] + increments["m2"]
++        record = state.data["last_exit_evaluation"]
++        assert record["outcome"] in ("NO_EXIT", "PROTECTIVE_EXIT")
++        assert record["config_hash"] == config.config_hash
++
++    def test_repeated_concurrent_runs_deterministic_totals(self, tmp_path):
++        """ТЗ §6.17 (детерминизм): повторный параллельный прогон с теми же
++        параметрами даёт ТОТ же итоговый счётчик (обновления не теряются
++        ни в одном прогоне)."""
++        totals = []
++        for _ in range(3):
++            with __import__("tempfile").TemporaryDirectory() as tmp:
++                manager = StrategyStateManager(
++                    StateStore(path=tmp))
++                config = make_config()
++                coordinator, _, _ = make_coord(manager)
++                with ThreadPoolExecutor(max_workers=6) as pool:
++                    futures = [pool.submit(
++                        manager.update_state, "alpha", "FIGI1",
++                        config_hash=config.config_hash,
++                        updater=lambda current: {
++                            **ss.unfreeze(current.data),
++                            "counter": current.data.get("counter", 0) + 1,
++                        }) for _ in range(50)]
++                    for future in futures:
++                        future.result()
++                state = manager.get_state("alpha", "FIGI1",
++                                          config_hash=config.config_hash)
++                totals.append(state.data["counter"])
++        assert totals == [50, 50, 50]
++
++
++# ===========================================================================
++# Контракт использования координатора (misuse — исключения)
++# ===========================================================================
++
++class TestCoordinatorMisuse:
++    def test_rejects_wrong_manager_type(self):
++        with pytest.raises(CoordinatorViolationError):
++            ExitDecisionCoordinator(
++                manager="not-a-manager",
++                strategic_evaluator=CountingEvaluator(
++                    ExitDecisionSource.STRATEGIC),
++                protective_evaluator=CountingEvaluator(
++                    ExitDecisionSource.PROTECTIVE))
++
++    def test_rejects_manager_without_exact_type(self):
++        class FakeManager:
++            pass
++        with pytest.raises(CoordinatorViolationError):
++            ExitDecisionCoordinator(
++                manager=FakeManager(),
++                strategic_evaluator=CountingEvaluator(
++                    ExitDecisionSource.STRATEGIC),
++                protective_evaluator=CountingEvaluator(
++                    ExitDecisionSource.PROTECTIVE))
++
++    def test_rejects_evaluator_without_evaluate_exit(self):
++        manager = StrategyStateManager(StateStore())
++        with pytest.raises(CoordinatorViolationError):
++            ExitDecisionCoordinator(
++                manager=manager,
++                strategic_evaluator=object(),
++                protective_evaluator=CountingEvaluator(
++                    ExitDecisionSource.PROTECTIVE))
++
++    def test_rejects_wrong_config_type(self):
++        manager = StrategyStateManager(StateStore())
++        coordinator, _, _ = make_coord(manager)
++        with pytest.raises(CoordinatorViolationError):
++            run(coordinator, {"strategy_id": "alpha"})
++
++    def test_rejects_bad_figi(self):
++        manager = StrategyStateManager(StateStore())
++        config = make_config()
++        coordinator, _, _ = make_coord(manager)
++        with pytest.raises(CoordinatorViolationError):
++            run(coordinator, config, figi="../traversal",
++                price_required=False)  # без цены: figi проверяется раньше
++
++    def test_rejects_non_bool_price_required(self):
++        manager = StrategyStateManager(StateStore())
++        config = make_config()
++        coordinator, _, _ = make_coord(manager)
++        with pytest.raises(CoordinatorViolationError):
++            coordinator.evaluate_and_record(
++                config=config, figi="FIGI1", price_required="yes",
++                price_max_age_seconds=120.0, price=make_price())
++
++    def test_rejects_bad_max_age(self):
++        manager = StrategyStateManager(StateStore())
++        config = make_config()
++        coordinator, _, _ = make_coord(manager)
++        with pytest.raises(CoordinatorViolationError):
++            coordinator.evaluate_and_record(
++                config=config, figi="FIGI1", price_required=True,
++                price_max_age_seconds=-5.0, price=make_price())
++
++    def test_rejects_naive_now(self):
++        manager = StrategyStateManager(StateStore())
++        config = make_config()
++        coordinator, _, _ = make_coord(manager)
++        with pytest.raises(CoordinatorViolationError):
++            coordinator.evaluate_and_record(
++                config=config, figi="FIGI1", price_required=True,
++                price_max_age_seconds=120.0, price=make_price(),
++                now=datetime(2026, 11, 28, 12, 0, 0))  # naive
+```
+
